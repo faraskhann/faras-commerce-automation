@@ -1,0 +1,21 @@
+{
+  "name": "faras-commerce-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI customer support chatbot backend connecting Claude to a Shopify store's Admin API",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed:orders": "node scripts/create-test-orders.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}

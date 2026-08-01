@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Widget test page</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        max-width: 640px;
+        margin: 80px auto;
+        padding: 0 24px;
+        color: #111827;
+        line-height: 1.6;
+      }
+      code {
+        background: #f3f4f6;
+        padding: 2px 5px;
+        border-radius: 4px;
+        font-size: 0.9em;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Support widget — local test page</h1>
+    <p>
+      Served by the backend itself, so the widget's requests are same-origin and no
+      CORS or mixed-content rules get in the way. Use this to check the widget before
+      installing it on a storefront.
+    </p>
+    <p>Try: <code>Do you have the Complete Snowboard in blue?</code></p>
+    <p>
+      Clear the stored conversation with
+      <code>localStorage.clear()</code> in the browser console, then reload.
+    </p>
+
+    <!-- No data-api-url: the widget falls back to this page's own origin, which is
+         correct both locally and on the deployed host. Storefront installs (a
+         different origin) must still set data-api-url explicitly. -->
+    <script src="/widget.js"></script>
+  </body>
+</html>
