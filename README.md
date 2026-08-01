@@ -27,7 +27,7 @@ Requires Node 20+ (built and tested on Node 24).
 
 ### 2. Create your `.env`
 
-Copy the example and fill in the three values:
+Copy the example and fill it in:
 
 ```powershell
 Copy-Item .env.example .env
@@ -37,15 +37,24 @@ Copy-Item .env.example .env
 | --- | --- |
 | `ANTHROPIC_API_KEY` | https://console.anthropic.com/settings/keys |
 | `SHOPIFY_STORE_DOMAIN` | Your dev store host, e.g. `my-dev-store.myshopify.com` (no `https://`) |
-| `SHOPIFY_ADMIN_TOKEN` | Admin API access token from a custom app on the store (`shpat_…`) |
+| `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` | Your app's client credentials in the Shopify Dev Dashboard — **the production setup** |
+| `SHOPIFY_ADMIN_TOKEN` | Fallback only: a manually minted access token. **Expires ~24h after creation** — fine for a quick test, never for production |
 | `PORT` | Optional, defaults to `3000` |
 
 `.env` and `node_modules/` are gitignored.
 
-**Getting the Shopify token:** in your dev store go to **Settings → Apps and sales
-channels → Develop apps → Create an app**, then under **Configuration → Admin API
-integration** grant scopes and **Install app**. The token is revealed once, under
-**API credentials**.
+**Why client credentials:** access tokens obtained through the client credentials
+grant expire after about 24 hours (`expires_in` ≈ 86399 in the token response). A
+token pasted into `.env` therefore dies silently within a day — which looks like the
+bot suddenly answering "the lookup failed" for everything. With the client ID and
+secret configured, the backend requests its own token at startup, refreshes it
+automatically 5 minutes before expiry, and re-fetches once if Shopify ever answers
+401 anyway. Refreshes are logged (`[shopify] access token refreshed…`) without the
+secret or token values.
+
+**Getting the credentials:** open your app in the Shopify Dev Dashboard, grant the
+scopes below, install it on the store, and copy the **Client ID** and **Client
+secret** from the app's settings into `.env`.
 
 Scopes needed:
 
@@ -581,10 +590,15 @@ customer data is involved.
 
 **Credentials**
 
-- [ ] **Rotate the Shopify Admin token** if it was ever pasted, shared, or displayed
-      anywhere outside this project — chat logs, screenshots, terminal history, a
-      teammate's DM. Same for the Anthropic key. Rotation is cheap; assume anything
-      that left the `.env` file is burned.
+- [ ] **Use client credentials** (`SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`), not
+      a pasted `SHOPIFY_ADMIN_TOKEN` — manual tokens expire after ~24h and take the
+      bot down silently. Token refresh is automatic; expiry is no longer a reason to
+      touch credentials.
+- [ ] **Rotate the client secret** (and the Anthropic key) after any security
+      incident: pasted into a chat log, visible in a screenshot, sitting in terminal
+      history, sent in a DM. Rotation is cheap; assume anything that left the `.env`
+      file is burned. Automatic refresh does not protect against a leaked *secret* —
+      it protects against expiry.
 - [ ] `.env` exists only on the server, is not in git (`git status` should never show
       it), and file permissions restrict who can read it.
 - [ ] The Shopify custom app has **only** the scopes this backend needs

@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { handleMessage } from "./agent.js";
 import { rateLimit } from "./ratelimit.js";
 import { clearSession, sessionCount } from "./sessions.js";
+import { refreshAccessToken, usingClientCredentials } from "./token.js";
 
 const app = express();
 
@@ -94,6 +95,16 @@ app.listen(config.port, () => {
   console.log(`Listening on http://localhost:${config.port}`);
   console.log(`Model: ${config.model}`);
   console.log(`Store: ${config.shopify.domain} (Admin API ${config.shopify.apiVersion})`);
+  if (usingClientCredentials()) {
+    console.log("Auth:  client credentials (tokens auto-refresh)");
+    // Warm the token now so the first shopper doesn't pay the refresh latency.
+    // Failure is loud but non-fatal — calls will retry, and /health stays up.
+    refreshAccessToken("startup").catch((error) =>
+      console.error(`[shopify] startup token fetch failed: ${error.message}`)
+    );
+  } else {
+    console.log("Auth:  static SHOPIFY_ADMIN_TOKEN (expires ~24h — set SHOPIFY_CLIENT_ID/SECRET for auto-refresh)");
+  }
   console.log(`CORS:  ${config.allowedOrigins.join(", ")}`);
   console.log(`Demo:  http://localhost:${config.port}/demo.html`);
 });

@@ -29,6 +29,9 @@
   var GREETING =
     data.greeting || "Hi! Ask me about an order or anything in the store.";
   var ACCENT = data.accent || "#2563eb";
+  // data-auto-open="true" expands the chat window immediately on load — useful on
+  // demo/test pages. Storefronts should leave it off and let shoppers open it.
+  var AUTO_OPEN = data.autoOpen === "true";
 
   // The ":v2" suffix orphans transcripts and sessionIds stored by earlier widget
   // versions, whose conversations predate the server's grounding checks. Bump it
@@ -183,6 +186,7 @@
   function mount() {
     document.body.appendChild(bubble);
     document.body.appendChild(panel);
+    if (AUTO_OPEN) openPanel();
   }
 
   if (document.body) {
@@ -364,4 +368,25 @@
     input.value = "";
     sendMessage(text);
   });
+
+  // Small public API so host pages can control the widget (demo page, a custom
+  // "Chat with us" link in the theme, etc.).
+  window.SupportChatWidget = {
+    open: openPanel,
+    close: closePanel,
+    toggle: function () {
+      if (panel.classList.contains("scw-open")) closePanel();
+      else openPanel();
+    },
+    isOpen: function () {
+      return panel.classList.contains("scw-open");
+    },
+    send: function (text) {
+      var trimmed = String(text == null ? "" : text).trim();
+      if (!trimmed || busy) return false;
+      openPanel();
+      sendMessage(trimmed);
+      return true;
+    },
+  };
 })();

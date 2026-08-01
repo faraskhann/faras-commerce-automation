@@ -1,4 +1,10 @@
 import { config } from "./config.js";
+import {
+  getAccessToken,
+  invalidateAccessToken,
+  refreshAccessToken,
+  usingClientCredentials,
+} from "./token.js";
 
 export class ShopifyError extends Error {
   constructor(message, { status, details } = {}) {
@@ -12,20 +18,42 @@ export class ShopifyError extends Error {
 /**
  * Run a GraphQL operation against the Shopify Admin API.
  * Throws ShopifyError on transport failures, HTTP errors, or GraphQL `errors`.
+ *
+ * The access token comes from token.js — refreshed proactively near expiry, and
+ * once more here if Shopify still answers 401 (clock skew, revocation).
  */
-export async function shopifyGraphQL(query, variables = {}) {
+export async function shopifyGraphQL(query, variables = {}, { retryOn401 = true } = {}) {
+  let token;
+  try {
+    token = await getAccessToken();
+  } catch (cause) {
+    throw new ShopifyError(`Could not obtain a Shopify access token: ${cause.message}`);
+  }
+
   let response;
   try {
     response = await fetch(config.shopify.graphqlUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": config.shopify.adminToken,
+        "X-Shopify-Access-Token": token,
       },
       body: JSON.stringify({ query, variables }),
     });
   } catch (cause) {
     throw new ShopifyError(`Could not reach Shopify: ${cause.message}`);
+  }
+
+  // An expired-anyway token: drop it, mint a fresh one, retry exactly once.
+  if (response.status === 401 && retryOn401 && usingClientCredentials()) {
+    console.warn("[shopify] got 401 — refreshing access token and retrying once");
+    invalidateAccessToken();
+    try {
+      await refreshAccessToken("401 from API");
+    } catch (cause) {
+      throw new ShopifyError(`Could not obtain a Shopify access token: ${cause.message}`);
+    }
+    return shopifyGraphQL(query, variables, { retryOn401: false });
   }
 
   const raw = await response.text();

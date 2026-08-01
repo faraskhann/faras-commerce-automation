@@ -8,7 +8,7 @@
       body {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
         max-width: 640px;
-        margin: 80px auto;
+        margin: 60px auto;
         padding: 0 24px;
         color: #111827;
         line-height: 1.6;
@@ -19,24 +19,113 @@
         border-radius: 4px;
         font-size: 0.9em;
       }
+      .warn {
+        display: none;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #991b1b;
+        border-radius: 8px;
+        padding: 12px 16px;
+        margin: 16px 0;
+      }
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 20px 0;
+      }
+      .controls button {
+        border: 1px solid #d1d5db;
+        background: #fff;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      .controls button:hover {
+        background: #f3f4f6;
+      }
+      .controls .primary {
+        background: #2563eb;
+        border-color: #2563eb;
+        color: #fff;
+      }
+      .controls .primary:hover {
+        background: #1d4ed8;
+      }
+      .samples button {
+        border: 1px dashed #93c5fd;
+        background: #eff6ff;
+        color: #1d4ed8;
+        border-radius: 8px;
+        padding: 8px 12px;
+        font-size: 13px;
+        cursor: pointer;
+        text-align: left;
+      }
+      .samples button:hover {
+        background: #dbeafe;
+      }
     </style>
   </head>
   <body>
     <h1>Support widget — local test page</h1>
+
+    <div class="warn" id="load-warning">
+      <strong>The chat widget failed to load.</strong> This page must be opened
+      through the running backend — start the server (<code>npm start</code>) and open
+      <a href="http://localhost:3000/demo.html">http://localhost:3000/demo.html</a>,
+      not the HTML file directly from disk.
+    </div>
+
     <p>
-      Served by the backend itself, so the widget's requests are same-origin and no
-      CORS or mixed-content rules get in the way. Use this to check the widget before
-      installing it on a storefront.
+      The chat window opens automatically on this page (on a real storefront it stays
+      as the round bubble in the bottom-right corner until clicked). Type in the box at
+      the bottom of the chat window and press <strong>Send</strong> — the assistant's
+      reply appears in the same window.
     </p>
-    <p>Try: <code>Do you have the Complete Snowboard in blue?</code></p>
+
+    <div class="controls">
+      <button type="button" class="primary" onclick="SupportChatWidget.open()">Open chat</button>
+      <button type="button" onclick="SupportChatWidget.close()">Close chat</button>
+      <button type="button" onclick="localStorage.clear(); location.reload()">
+        Reset conversation
+      </button>
+    </div>
+
+    <p>Or click a sample question to send it straight to the assistant:</p>
+    <div class="controls samples">
+      <button type="button" onclick="SupportChatWidget.send(this.textContent)">
+        Do you have anything to wax my snowboard with?
+      </button>
+      <button type="button" onclick="SupportChatWidget.send(this.textContent)">
+        Do you have the Complete Snowboard in blue?
+      </button>
+      <button type="button" onclick="SupportChatWidget.send(this.textContent)">
+        Where's my order #1001? It was placed with ada.tester@example.com
+      </button>
+      <button type="button" onclick="SupportChatWidget.send(this.textContent)">
+        I need a gift for someone who snowboards
+      </button>
+    </div>
+
     <p>
-      Clear the stored conversation with
-      <code>localStorage.clear()</code> in the browser console, then reload.
+      <strong>Reset conversation</strong> clears this browser's stored session and
+      transcript (same as running <code>localStorage.clear()</code> in the console).
     </p>
 
     <!-- No data-api-url: the widget falls back to this page's own origin, which is
          correct both locally and on the deployed host. Storefront installs (a
          different origin) must still set data-api-url explicitly. -->
-    <script src="/widget.js"></script>
+    <script src="/widget.js" data-auto-open="true"></script>
+    <script>
+      // If widget.js didn't execute (page opened via file://, server down), surface
+      // a visible explanation instead of a silently empty page.
+      window.addEventListener("load", function () {
+        if (!window.SupportChatWidget) {
+          document.getElementById("load-warning").style.display = "block";
+        }
+      });
+    </script>
   </body>
 </html>

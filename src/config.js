@@ -45,7 +45,23 @@ function resolveAllowedOrigins(storeDomain) {
 
 const shopifyDomain = normalizeDomain(required("SHOPIFY_STORE_DOMAIN"));
 
-const adminToken = required("SHOPIFY_ADMIN_TOKEN");
+// Preferred: client credentials, so the backend mints and refreshes its own
+// access tokens (they expire after ~24h). Fallback: a manually pasted token.
+const clientId = (process.env.SHOPIFY_CLIENT_ID || "").trim() || null;
+const clientSecret = (process.env.SHOPIFY_CLIENT_SECRET || "").trim() || null;
+const adminToken = (process.env.SHOPIFY_ADMIN_TOKEN || "").trim() || null;
+
+if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
+  throw new Error(
+    "SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set together — only one is present."
+  );
+}
+if (!clientId && !adminToken) {
+  throw new Error(
+    "Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (recommended — tokens auto-refresh) " +
+      "or SHOPIFY_ADMIN_TOKEN (manual, expires ~24h) in .env."
+  );
+}
 
 export const config = {
   port,
@@ -62,6 +78,8 @@ export const config = {
   anthropicApiKey: required("ANTHROPIC_API_KEY"),
   shopify: {
     domain: shopifyDomain,
+    clientId,
+    clientSecret,
     adminToken,
     apiVersion: SHOPIFY_API_VERSION,
     get graphqlUrl() {
