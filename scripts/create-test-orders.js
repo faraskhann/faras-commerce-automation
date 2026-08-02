@@ -20,6 +20,16 @@
 import { shopifyGraphQL, ShopifyError } from "../src/shopify.js";
 import { config } from "../src/config.js";
 
+// Dev tooling: seeds the env-configured dev store only. To seed a multi-tenant
+// client's store, run this with that store's env vars set instead.
+if (!config.devStore) {
+  console.error(
+    "No dev store configured (SHOPIFY_STORE_DOMAIN + credentials) — this script seeds the dev store only."
+  );
+  process.exit(1);
+}
+const store = config.devStore;
+
 const CURRENCY = (process.env.SHOPIFY_CURRENCY || "USD").toUpperCase();
 
 const TEST_ORDERS = [
@@ -137,7 +147,7 @@ function assertNoUserErrors(step, payload) {
 }
 
 async function createOrder(spec) {
-  const created = await shopifyGraphQL(DRAFT_ORDER_CREATE, {
+  const created = await shopifyGraphQL(store, DRAFT_ORDER_CREATE, {
     input: {
       email: spec.email,
       shippingAddress: spec.shippingAddress,
@@ -153,14 +163,14 @@ async function createOrder(spec) {
 
   const draftId = created.draftOrderCreate.draftOrder.id;
 
-  const completed = await shopifyGraphQL(DRAFT_ORDER_COMPLETE, { id: draftId });
+  const completed = await shopifyGraphQL(store, DRAFT_ORDER_COMPLETE, { id: draftId });
   assertNoUserErrors("draftOrderComplete", completed.draftOrderComplete);
 
   return completed.draftOrderComplete.draftOrder.order;
 }
 
 async function fulfillOrder(orderId, tracking) {
-  const data = await shopifyGraphQL(FULFILLMENT_ORDERS, { id: orderId });
+  const data = await shopifyGraphQL(store, FULFILLMENT_ORDERS, { id: orderId });
   const fulfillmentOrders = (data?.order?.fulfillmentOrders?.edges ?? [])
     .map(({ node }) => node)
     .filter((node) => node.status === "OPEN" || node.status === "IN_PROGRESS");
@@ -196,14 +206,14 @@ async function fulfillOrder(orderId, tracking) {
     }
   `;
 
-  const result = await shopifyGraphQL(mutation);
+  const result = await shopifyGraphQL(store, mutation);
   assertNoUserErrors("fulfillmentCreate", result.fulfillmentCreate);
   return result.fulfillmentCreate.fulfillment;
 }
 
 async function main() {
-  console.log(`Store:    ${config.shopify.domain}`);
-  console.log(`API:      ${config.shopify.apiVersion}`);
+  console.log(`Store:    ${store.domain}`);
+  console.log(`API:      ${config.shopifyApiVersion}`);
   console.log(`Currency: ${CURRENCY} (override with SHOPIFY_CURRENCY)\n`);
 
   const created = [];

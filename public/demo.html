@@ -88,9 +88,7 @@
     <div class="controls">
       <button type="button" class="primary" onclick="SupportChatWidget.open()">Open chat</button>
       <button type="button" onclick="SupportChatWidget.close()">Close chat</button>
-      <button type="button" onclick="localStorage.clear(); location.reload()">
-        Reset conversation
-      </button>
+      <button type="button" onclick="location.reload()">Reset conversation</button>
     </div>
 
     <p>Or click a sample question to send it straight to the assistant:</p>
@@ -110,8 +108,8 @@
     </div>
 
     <p>
-      <strong>Reset conversation</strong> clears this browser's stored session and
-      transcript (same as running <code>localStorage.clear()</code> in the console).
+      <strong>Reset conversation</strong> just reloads the page — every load starts a
+      brand-new session; nothing is stored in the browser.
     </p>
 
     <!-- No data-api-url: the widget falls back to this page's own origin, which is

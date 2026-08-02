@@ -1,4 +1,4 @@
-import { config } from "./config.js";
+import { graphqlUrlFor } from "./config.js";
 import {
   getAccessToken,
   invalidateAccessToken,
@@ -16,23 +16,28 @@ export class ShopifyError extends Error {
 }
 
 /**
- * Run a GraphQL operation against the Shopify Admin API.
- * Throws ShopifyError on transport failures, HTTP errors, or GraphQL `errors`.
+ * Run a GraphQL operation against one store's Admin API.
  *
- * The access token comes from token.js — refreshed proactively near expiry, and
- * once more here if Shopify still answers 401 (clock skew, revocation).
+ * `store` is the per-request resolved client (domain + credentials) and is
+ * passed explicitly through the whole call chain — nothing here reads a
+ * module-level "current store", so concurrent requests for different clients
+ * cannot cross.
+ *
+ * Throws ShopifyError on transport failures, HTTP errors, or GraphQL `errors`.
+ * The access token is refreshed proactively near expiry, and once more here if
+ * Shopify still answers 401 (clock skew, revocation).
  */
-export async function shopifyGraphQL(query, variables = {}, { retryOn401 = true } = {}) {
+export async function shopifyGraphQL(store, query, variables = {}, { retryOn401 = true } = {}) {
   let token;
   try {
-    token = await getAccessToken();
+    token = await getAccessToken(store);
   } catch (cause) {
     throw new ShopifyError(`Could not obtain a Shopify access token: ${cause.message}`);
   }
 
   let response;
   try {
-    response = await fetch(config.shopify.graphqlUrl, {
+    response = await fetch(graphqlUrlFor(store.domain), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -45,15 +50,17 @@ export async function shopifyGraphQL(query, variables = {}, { retryOn401 = true 
   }
 
   // An expired-anyway token: drop it, mint a fresh one, retry exactly once.
-  if (response.status === 401 && retryOn401 && usingClientCredentials()) {
-    console.warn("[shopify] got 401 — refreshing access token and retrying once");
-    invalidateAccessToken();
+  if (response.status === 401 && retryOn401 && usingClientCredentials(store)) {
+    console.warn(
+      `[shopify:${store.clientKey}] got 401 — refreshing access token and retrying once`
+    );
+    invalidateAccessToken(store);
     try {
-      await refreshAccessToken("401 from API");
+      await refreshAccessToken(store, "401 from API");
     } catch (cause) {
       throw new ShopifyError(`Could not obtain a Shopify access token: ${cause.message}`);
     }
-    return shopifyGraphQL(query, variables, { retryOn401: false });
+    return shopifyGraphQL(store, query, variables, { retryOn401: false });
   }
 
   const raw = await response.text();
@@ -185,8 +192,8 @@ function stripQuotes(value) {
   return String(value).trim().replace(/["'\\]/g, "");
 }
 
-async function findOrderByName(name) {
-  const data = await shopifyGraphQL(ORDER_BY_NAME_QUERY, {
+async function findOrderByName(store, name) {
+  const data = await shopifyGraphQL(store, ORDER_BY_NAME_QUERY, {
     search: `name:"${name}"`,
   });
   return data?.orders?.edges?.[0]?.node ?? null;
@@ -213,7 +220,7 @@ function verificationFailure() {
  * generic `{ verified: false }` shape — never throws for "not found", and never
  * reveals which part of the check failed.
  */
-export async function getOrderStatus(orderNumberInput, emailInput) {
+export async function getOrderStatus(store, orderNumberInput, emailInput) {
   const cleaned = stripQuotes(orderNumberInput);
   const email = String(emailInput ?? "").trim().toLowerCase();
 
@@ -229,7 +236,7 @@ export async function getOrderStatus(orderNumberInput, emailInput) {
 
   let order = null;
   for (const candidate of candidates) {
-    order = await findOrderByName(candidate);
+    order = await findOrderByName(store, candidate);
     if (order) break;
   }
 
@@ -468,8 +475,8 @@ function mapOptions(node) {
     .map((option) => ({ name: option.name, values: option.values ?? [] }));
 }
 
-async function runSingleKeywordSearch(keyword) {
-  const data = await shopifyGraphQL(PRODUCT_SEARCH_QUERY, {
+async function runSingleKeywordSearch(store, keyword) {
+  const data = await shopifyGraphQL(store, PRODUCT_SEARCH_QUERY, {
     search: buildProductSearch([keyword]),
     first: MAX_PRODUCT_RESULTS,
   });
@@ -489,7 +496,7 @@ async function runSingleKeywordSearch(keyword) {
     tags: node.tags ?? [],
     // onlineStoreUrl is null until a product is published to the Online Store
     // channel; the handle URL is the address it will have once it is.
-    url: node.onlineStoreUrl ?? `https://${config.shopify.domain}/products/${node.handle}`,
+    url: node.onlineStoreUrl ?? `https://${store.domain}/products/${node.handle}`,
     in_stock: node.totalInventory === null ? null : node.totalInventory > 0,
     options: mapOptions(node),
     variants: mapVariants(node),
@@ -507,9 +514,9 @@ async function runSingleKeywordSearch(keyword) {
  * "wax my snowboard" filled all 5 slots with snowboards and dropped the one
  * product the shopper actually wanted (the wax).
  */
-async function runProductSearch(keywords) {
+async function runProductSearch(store, keywords) {
   const lists = await Promise.all(
-    keywords.slice(0, 6).map((keyword) => runSingleKeywordSearch(keyword))
+    keywords.slice(0, 6).map((keyword) => runSingleKeywordSearch(store, keyword))
   );
 
   const byTitle = new Map();
@@ -635,7 +642,7 @@ function pricingSummary(products) {
  * real variant data and reported as available true/false, so an attribute that does
  * not exist comes back as an explicit fact rather than something to be inferred.
  */
-export async function searchProducts(queryInput, requestedAttributes) {
+export async function searchProducts(store, queryInput, requestedAttributes) {
   const keywords = keywordsFrom(queryInput);
 
   const attributes = [
@@ -653,7 +660,7 @@ export async function searchProducts(queryInput, requestedAttributes) {
     return { query: queryInput, products: [], result_count: 0, reason: "no_searchable_terms" };
   }
 
-  let products = await runProductSearch(keywords);
+  let products = await runProductSearch(store, keywords);
   let broadened = false;
 
   if (products.length < MIN_RESULTS_BEFORE_BROADENING) {
@@ -666,7 +673,7 @@ export async function searchProducts(queryInput, requestedAttributes) {
       broadened = true;
       const seen = new Set(products.map((p) => p.title));
       // First-pass hits stay in front — they matched the shopper's literal words.
-      for (const product of await runProductSearch(broaderKeywords)) {
+      for (const product of await runProductSearch(store, broaderKeywords)) {
         if (!seen.has(product.title)) {
           products.push(product);
           seen.add(product.title);

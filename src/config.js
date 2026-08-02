@@ -19,53 +19,65 @@ function normalizeDomain(raw) {
 
 const port = Number(process.env.PORT) || 3000;
 
-/**
- * Origins allowed to call /chat from a browser.
- *
- * ALLOWED_ORIGIN takes a comma-separated list, or "*" to allow any origin. With it
- * unset, local development works out of the box: the dev store's own domain plus
- * localhost, so the demo page and the storefront both function without config.
- */
-function resolveAllowedOrigins(storeDomain) {
-  const configured = (process.env.ALLOWED_ORIGIN || "").trim();
+const databaseUrl = (process.env.DATABASE_URL || "").trim() || null;
 
-  if (configured) {
-    return configured
-      .split(",")
-      .map((origin) => origin.trim().replace(/\/+$/, ""))
-      .filter(Boolean);
+/**
+ * DEV-ONLY single-store fallback, active only when DATABASE_URL is not set.
+ * In multi-tenant mode every request resolves its store from the clients table
+ * and these env vars are ignored entirely — there is no default store to fall
+ * back to.
+ */
+function resolveDevStore() {
+  const domainRaw = (process.env.SHOPIFY_STORE_DOMAIN || "").trim();
+  if (!domainRaw) return null;
+
+  const clientId = (process.env.SHOPIFY_CLIENT_ID || "").trim() || null;
+  const clientSecret = (process.env.SHOPIFY_CLIENT_SECRET || "").trim() || null;
+  const adminToken = (process.env.SHOPIFY_ADMIN_TOKEN || "").trim() || null;
+
+  if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
+    throw new Error(
+      "SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set together — only one is present."
+    );
+  }
+  if (!clientId && !adminToken) {
+    throw new Error(
+      "Dev store needs SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (recommended) " +
+        "or SHOPIFY_ADMIN_TOKEN in .env."
+    );
   }
 
-  return [
-    `https://${storeDomain}`,
-    `http://localhost:${port}`,
-    `http://127.0.0.1:${port}`,
-  ];
+  const domain = normalizeDomain(domainRaw);
+  const configuredOrigins = (process.env.ALLOWED_ORIGIN || "").trim();
+  const allowedOrigins = configuredOrigins
+    ? configuredOrigins.split(",").map((o) => o.trim().replace(/\/+$/, "")).filter(Boolean)
+    : [`https://${domain}`, `http://localhost:${port}`, `http://127.0.0.1:${port}`];
+
+  return {
+    clientKey: "__dev",
+    domain,
+    shopifyClientId: clientId,
+    shopifyClientSecret: clientSecret,
+    adminToken,
+    allowedOrigins,
+  };
 }
 
-const shopifyDomain = normalizeDomain(required("SHOPIFY_STORE_DOMAIN"));
+const devStore = resolveDevStore();
 
-// Preferred: client credentials, so the backend mints and refreshes its own
-// access tokens (they expire after ~24h). Fallback: a manually pasted token.
-const clientId = (process.env.SHOPIFY_CLIENT_ID || "").trim() || null;
-const clientSecret = (process.env.SHOPIFY_CLIENT_SECRET || "").trim() || null;
-const adminToken = (process.env.SHOPIFY_ADMIN_TOKEN || "").trim() || null;
-
-if ((clientId && !clientSecret) || (!clientId && clientSecret)) {
+if (!databaseUrl && !devStore) {
   throw new Error(
-    "SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set together — only one is present."
-  );
-}
-if (!clientId && !adminToken) {
-  throw new Error(
-    "Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (recommended — tokens auto-refresh) " +
-      "or SHOPIFY_ADMIN_TOKEN (manual, expires ~24h) in .env."
+    "Configure DATABASE_URL for multi-tenant mode, or SHOPIFY_STORE_DOMAIN (+ credentials) " +
+      "for single-store local development."
   );
 }
 
 export const config = {
   port,
-  allowedOrigins: resolveAllowedOrigins(shopifyDomain),
+  databaseUrl,
+  // true -> clients come from the database; false -> dev single-store mode.
+  multiTenant: Boolean(databaseUrl),
+  devStore,
   rateLimit: {
     perIpPerMinute: Number(process.env.RATE_LIMIT_PER_IP) || 20,
     perSessionPerMinute: Number(process.env.RATE_LIMIT_PER_SESSION) || 12,
@@ -76,19 +88,15 @@ export const config = {
   // collectively. Leave unset when the server is hit directly.
   trustProxy: process.env.TRUST_PROXY === "1" || process.env.TRUST_PROXY === "true",
   anthropicApiKey: required("ANTHROPIC_API_KEY"),
-  shopify: {
-    domain: shopifyDomain,
-    clientId,
-    clientSecret,
-    adminToken,
-    apiVersion: SHOPIFY_API_VERSION,
-    get graphqlUrl() {
-      return `https://${this.domain}/admin/api/${this.apiVersion}/graphql.json`;
-    },
-  },
+  shopifyApiVersion: SHOPIFY_API_VERSION,
   model: "claude-haiku-4-5-20251001",
   // Cap on how many tool_use -> tool_result round trips one /chat call may run.
   maxToolRounds: 5,
   // Cap on stored messages per session so memory doesn't grow unbounded.
   maxHistoryMessages: 40,
 };
+
+/** Admin GraphQL endpoint for a given store domain. */
+export function graphqlUrlFor(domain) {
+  return `https://${domain}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`;
+}

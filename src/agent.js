@@ -166,16 +166,16 @@ const TOOLS = [
 ];
 
 // name -> { args, run }. `args` are required string inputs, validated before
-// dispatch; `run` receives the whole input object so a tool can take optional
-// extras too.
+// dispatch; `run` receives the resolved store explicitly plus the input object —
+// tools never read store config from shared state.
 const TOOL_HANDLERS = {
   get_order_status: {
     args: ["order_number", "email"],
-    run: (input) => getOrderStatus(input.order_number, input.email),
+    run: (store, input) => getOrderStatus(store, input.order_number, input.email),
   },
   search_products: {
     args: ["query"],
-    run: (input) => searchProducts(input.query, input.attributes),
+    run: (store, input) => searchProducts(store, input.query, input.attributes),
   },
 };
 
@@ -184,7 +184,7 @@ const TOOL_HANDLERS = {
  * Tool failures come back as `is_error` results rather than thrown errors so
  * Claude can tell the customer what happened instead of the request 500ing.
  */
-async function runTool(toolUse) {
+async function runTool(store, toolUse) {
   const handler = TOOL_HANDLERS[toolUse.name];
   if (!handler) {
     return { content: `Unknown tool: ${toolUse.name}`, isError: true };
@@ -201,7 +201,7 @@ async function runTool(toolUse) {
   }
 
   try {
-    const result = await handler.run(toolUse.input);
+    const result = await handler.run(store, toolUse.input);
     return { content: JSON.stringify(result), isError: false, payload: result };
   } catch (error) {
     const detail =
@@ -257,8 +257,11 @@ function groundingCorrective(violations) {
  * and retried with a corrective note; if retries run out, a safe fallback goes to
  * the customer instead. Rejected drafts never enter the saved history.
  */
-export async function handleMessage({ sessionId, message }) {
-  const messages = [...getHistory(sessionId), { role: "user", content: message }];
+export async function handleMessage({ store, sessionId, message }) {
+  // Sessions are namespaced by client so the same sessionId arriving from two
+  // different clients can never share (or leak) conversation history.
+  const sessionKey = `${store.clientKey}::${sessionId}`;
+  const messages = [...getHistory(sessionKey), { role: "user", content: message }];
 
   // Parsed payloads of every successful tool call in THIS turn — the only data a
   // reply is allowed to reference.
@@ -307,19 +310,19 @@ export async function handleMessage({ sessionId, message }) {
         rejectedMessages.add(messages[messages.length - 1]);
         const saved = messages.filter((m) => !rejectedMessages.has(m));
         saved.push({ role: "assistant", content: GROUNDING_FALLBACK_REPLY });
-        setHistory(sessionId, saved);
+        setHistory(sessionKey, saved);
         return { reply: GROUNDING_FALLBACK_REPLY, stopReason: "grounding_failure" };
       }
 
       // Clean reply — save history without any rejected draft/corrective pairs.
-      setHistory(sessionId, messages.filter((m) => !rejectedMessages.has(m)));
+      setHistory(sessionKey, messages.filter((m) => !rejectedMessages.has(m)));
       return { reply: text, stopReason: response.stop_reason };
     }
 
     const toolUses = response.content.filter((block) => block.type === "tool_use");
 
     // Run the calls in this turn, then return every result in one user message.
-    const results = await Promise.all(toolUses.map(runTool));
+    const results = await Promise.all(toolUses.map((toolUse) => runTool(store, toolUse)));
     for (const result of results) {
       if (!result.isError && result.payload) turnPayloads.push(result.payload);
     }
@@ -341,7 +344,7 @@ export async function handleMessage({ sessionId, message }) {
   // tool_result — the next user message would otherwise break role alternation.
   const saved = messages.filter((m) => !rejectedMessages.has(m));
   saved.push({ role: "assistant", content: bailReply });
-  setHistory(sessionId, saved);
+  setHistory(sessionKey, saved);
   console.warn(`[agent] session ${sessionId} hit the tool-round limit`);
   return { reply: bailReply, stopReason: "tool_round_limit" };
 }

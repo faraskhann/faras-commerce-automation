@@ -32,60 +32,20 @@
   // data-auto-open="true" expands the chat window immediately on load — useful on
   // demo/test pages. Storefronts should leave it off and let shoppers open it.
   var AUTO_OPEN = data.autoOpen === "true";
+  // Identifies which client store this widget belongs to on a multi-tenant
+  // backend; sent with every /chat request. Omit only against a single-store
+  // dev backend.
+  var CLIENT_ID = data.clientId || null;
 
-  // The ":v2" suffix orphans transcripts and sessionIds stored by earlier widget
-  // versions, whose conversations predate the server's grounding checks. Bump it
-  // whenever old cached conversations should no longer resurface.
-  var STORAGE_SESSION = "support-chat:session:v2";
-  var STORAGE_LOG = "support-chat:log:v2";
-  var MAX_STORED_MESSAGES = 60;
-
-  /* ---------------------------------------------------------------- storage */
-
-  // localStorage throws in private mode and when cookies are blocked; the widget
-  // must still work, just without persistence.
-  var store = {
-    get: function (key) {
-      try {
-        return window.localStorage.getItem(key);
-      } catch (e) {
-        return null;
-      }
-    },
-    set: function (key, value) {
-      try {
-        window.localStorage.setItem(key, value);
-      } catch (e) {
-        /* not fatal */
-      }
-    },
-  };
-
+  // A fresh session on every page load, by design: nothing is persisted in
+  // localStorage — no sessionId, no transcript — so a shared or public computer
+  // never replays a previous visitor's conversation, and refresh always starts
+  // an empty chat.
   function newSessionId() {
     if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
     return "s-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
-
-  var sessionId = store.get(STORAGE_SESSION);
-  if (!sessionId) {
-    sessionId = newSessionId();
-    store.set(STORAGE_SESSION, sessionId);
-  }
-
-  function loadLog() {
-    try {
-      var parsed = JSON.parse(store.get(STORAGE_LOG) || "[]");
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  function saveLog(log) {
-    store.set(STORAGE_LOG, JSON.stringify(log.slice(-MAX_STORED_MESSAGES)));
-  }
-
-  var transcript = loadLog();
+  var sessionId = newSessionId();
 
   /* ------------------------------------------------------------------ styles */
 
@@ -248,17 +208,12 @@
     log.scrollTop = log.scrollHeight;
   }
 
-  function addMessage(role, text, options) {
+  function addMessage(role, text) {
     var el = document.createElement("div");
     el.className = "scw-msg scw-msg-" + role;
     renderText(el, text);
     log.appendChild(el);
     scrollToEnd();
-
-    if (!(options && options.skipStore)) {
-      transcript.push({ role: role, text: text });
-      saveLog(transcript);
-    }
     return el;
   }
 
@@ -272,15 +227,8 @@
     return el;
   }
 
-  // Replay whatever this browser has seen before; the backend still holds the
-  // authoritative history under the same sessionId.
-  if (transcript.length) {
-    transcript.forEach(function (entry) {
-      addMessage(entry.role, entry.text, { skipStore: true });
-    });
-  } else {
-    addMessage("bot", GREETING);
-  }
+  // Every page load starts an empty conversation — no cached history is restored.
+  addMessage("bot", GREETING);
 
   /* ------------------------------------------------------------------- send */
 
@@ -298,10 +246,13 @@
     setBusy(true);
 
     try {
+      var body = { message: text, sessionId: sessionId };
+      if (CLIENT_ID) body.client_id = CLIENT_ID;
+
       var response = await fetch(API_URL + "/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId: sessionId }),
+        body: JSON.stringify(body),
       });
 
       var payload = null;

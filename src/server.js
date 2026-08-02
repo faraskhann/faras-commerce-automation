@@ -1,4 +1,5 @@
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 import express from "express";
 import Anthropic from "@anthropic-ai/sdk";
@@ -8,30 +9,44 @@ import { handleMessage } from "./agent.js";
 import { rateLimit } from "./ratelimit.js";
 import { clearSession, sessionCount } from "./sessions.js";
 import { refreshAccessToken, usingClientCredentials } from "./token.js";
+import { getClientById, originIsRegistered } from "./db.js";
 
-const app = express();
+export const app = express();
 
 if (config.trustProxy) app.set("trust proxy", 1);
 
-/**
- * CORS for the storefront widget. The widget runs on the shop's domain and calls
- * this server cross-origin, so /chat needs both the response header and a preflight
- * answer — a JSON POST always triggers one.
- */
-app.use((req, res, next) => {
-  const { origin } = req.headers;
-  const allowAny = config.allowedOrigins.includes("*");
+function normalizeOrigin(origin) {
+  return String(origin || "").replace(/\/+$/, "");
+}
 
-  if (origin && (allowAny || config.allowedOrigins.includes(origin))) {
-    res.setHeader("Access-Control-Allow-Origin", allowAny ? "*" : origin);
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-    res.setHeader("Access-Control-Max-Age", "86400");
-  }
-  // Responses differ by Origin, so caches must not share them across origins.
+/**
+ * CORS. Preflights carry no body, so a preflight is answered for any origin
+ * registered to ANY client (or the dev store's origins in dev mode). The strict
+ * origin↔client binding is enforced on the actual POST below, where the
+ * client_id is available.
+ */
+app.use(async (req, res, next) => {
+  const origin = normalizeOrigin(req.headers.origin);
   res.setHeader("Vary", "Origin");
 
-  // Disallowed origins fall through without the headers, and the browser blocks them.
+  if (origin) {
+    let known = false;
+    try {
+      known = config.multiTenant
+        ? await originIsRegistered(origin)
+        : config.devStore.allowedOrigins.includes("*") ||
+          config.devStore.allowedOrigins.includes(origin);
+    } catch (error) {
+      console.error("[cors] origin lookup failed:", error.message);
+    }
+    if (known) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+      res.setHeader("Access-Control-Max-Age", "86400");
+    }
+  }
+
   if (req.method === "OPTIONS") return res.sendStatus(204);
   return next();
 });
@@ -42,8 +57,64 @@ app.use(express.json({ limit: "100kb" }));
 app.use(express.static(path.join(import.meta.dirname, "..", "public")));
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, model: config.model, sessions: sessionCount() });
+  res.json({
+    ok: true,
+    model: config.model,
+    mode: config.multiTenant ? "multi-tenant" : "dev-single-store",
+    sessions: sessionCount(),
+  });
 });
+
+/**
+ * Resolve which store this request is for. Multi-tenant mode requires a valid
+ * client_id and enforces the origin↔client binding; there is no fallback store.
+ * Dev mode (no DATABASE_URL) serves exactly the env-configured store.
+ *
+ * Returns { store } or { status, error }.
+ */
+async function resolveRequestStore(req) {
+  const clientId = req.body?.client_id;
+  const origin = normalizeOrigin(req.headers.origin);
+
+  if (!config.multiTenant) {
+    if (clientId) {
+      return {
+        status: 400,
+        error: "This server is not configured for multi-tenant use (no client registry).",
+      };
+    }
+    return { store: config.devStore };
+  }
+
+  if (typeof clientId !== "string" || !clientId.trim()) {
+    return { status: 400, error: "`client_id` is required." };
+  }
+
+  let store;
+  try {
+    store = await getClientById(clientId.trim());
+  } catch (error) {
+    console.error("[chat] client lookup failed:", error.message);
+    return { status: 503, error: "Service temporarily unavailable. Please try again." };
+  }
+
+  if (!store) {
+    // Same response shape as an origin mismatch — don't confirm which IDs exist.
+    return { status: 403, error: "Unknown client or origin not allowed." };
+  }
+
+  // A browser request claiming this client must arrive from one of the origins
+  // registered TO THIS CLIENT — another client's origin is rejected even though
+  // it would pass the generic preflight above.
+  if (origin && !store.allowedOrigins.includes(origin)) {
+    console.warn(
+      `[chat] origin/client mismatch: client ${store.clientKey} from origin ${origin}`
+    );
+    return { status: 403, error: "Unknown client or origin not allowed." };
+  }
+
+  return { store };
+}
 
 app.post("/chat", rateLimit(config.rateLimit), async (req, res) => {
   const { message, sessionId } = req.body ?? {};
@@ -55,8 +126,14 @@ app.post("/chat", rateLimit(config.rateLimit), async (req, res) => {
     return res.status(400).json({ error: "`sessionId` is required and must be a non-empty string." });
   }
 
+  const resolved = await resolveRequestStore(req);
+  if (!resolved.store) {
+    return res.status(resolved.status).json({ error: resolved.error });
+  }
+
   try {
     const { reply, stopReason } = await handleMessage({
+      store: resolved.store,
       sessionId: sessionId.trim(),
       message: message.trim(),
     });
@@ -77,9 +154,13 @@ app.post("/chat", rateLimit(config.rateLimit), async (req, res) => {
   }
 });
 
-// Handy while testing: wipe one session's history.
-app.delete("/chat/:sessionId", (req, res) => {
-  const existed = clearSession(req.params.sessionId);
+// Handy while testing: wipe one session's history (scoped per client).
+app.delete("/chat/:sessionId", async (req, res) => {
+  const resolved = await resolveRequestStore(req);
+  if (!resolved.store) {
+    return res.status(resolved.status).json({ error: resolved.error });
+  }
+  const existed = clearSession(`${resolved.store.clientKey}::${req.params.sessionId}`);
   res.json({ cleared: existed });
 });
 
@@ -91,25 +172,34 @@ app.use((error, _req, res, next) => {
   return next(error);
 });
 
-app.listen(config.port, () => {
-  console.log(`Listening on http://localhost:${config.port}`);
-  console.log(`Model: ${config.model}`);
-  console.log(`Store: ${config.shopify.domain} (Admin API ${config.shopify.apiVersion})`);
-  if (usingClientCredentials()) {
-    console.log("Auth:  client credentials (tokens auto-refresh)");
-    // Warm the token now so the first shopper doesn't pay the refresh latency.
-    // Failure is loud but non-fatal — calls will retry, and /health stays up.
-    refreshAccessToken("startup").catch((error) =>
-      console.error(`[shopify] startup token fetch failed: ${error.message}`)
-    );
-  } else {
-    console.log("Auth:  static SHOPIFY_ADMIN_TOKEN (expires ~24h — set SHOPIFY_CLIENT_ID/SECRET for auto-refresh)");
-  }
-  console.log(`CORS:  ${config.allowedOrigins.join(", ")}`);
-  console.log(`Demo:  http://localhost:${config.port}/demo.html`);
-});
+export function start() {
+  return app.listen(config.port, () => {
+    console.log(`Listening on http://localhost:${config.port}`);
+    console.log(`Model: ${config.model}`);
+    if (config.multiTenant) {
+      console.log("Mode:  multi-tenant (clients resolved from database per request)");
+    } else {
+      const dev = config.devStore;
+      console.log(`Mode:  DEV single-store — ${dev.domain} (set DATABASE_URL for multi-tenant)`);
+      console.log(`CORS:  ${dev.allowedOrigins.join(", ")}`);
+      if (usingClientCredentials(dev)) {
+        console.log("Auth:  client credentials (tokens auto-refresh)");
+        refreshAccessToken(dev, "startup").catch((error) =>
+          console.error(`[shopify] startup token fetch failed: ${error.message}`)
+        );
+      } else {
+        console.log("Auth:  static SHOPIFY_ADMIN_TOKEN (expires ~24h)");
+      }
+    }
+    console.log(`Demo:  http://localhost:${config.port}/demo.html`);
+  });
+}
 
 // Keep the process alive on unexpected async failures instead of crashing the server.
 process.on("unhandledRejection", (reason) => {
   console.error("[server] unhandled rejection:", reason);
 });
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  start();
+}

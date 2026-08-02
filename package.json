@@ -8,7 +8,9 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "seed:orders": "node scripts/create-test-orders.js"
+    "seed:orders": "node scripts/create-test-orders.js",
+    "migrate": "node scripts/migrate.js",
+    "add-client": "node scripts/add-client.js"
   },
   "engines": {
     "node": ">=20"
@@ -16,6 +18,10 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.14"
   }
 }

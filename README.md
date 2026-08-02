@@ -277,6 +277,75 @@ The second call should switch tools cleanly rather than searching the catalogue 
 
 ---
 
+## Multi-tenant mode: serving multiple client stores
+
+One deployment can serve many independent Shopify stores. Set `DATABASE_URL`
+(Supabase Postgres, Session-pooler connection string) and the backend switches to
+multi-tenant mode: every `/chat` request must carry a `client_id`, which is resolved
+against the `clients` table **on every request** — there is no default store, and the
+env-var store config is ignored entirely.
+
+### Onboarding a new client
+
+1. Create a Shopify app for the client's store (or have them install yours), grant
+   `read_orders` + `read_products`, and note the app's **Client ID** and **Client
+   secret**.
+2. Run the migration once per database: `npm run migrate`
+3. Register the client (this verifies the credentials with a live token grant before
+   inserting — a typo fails here, not in production):
+
+   ```powershell
+   npm run add-client -- `
+     --domain acme.myshopify.com `
+     --shopify-client-id <id> `
+     --shopify-client-secret <secret> `
+     --origin https://acme.myshopify.com,https://www.acme.com
+   ```
+
+   It prints the generated `client_id` and the exact widget snippet for the client's
+   theme:
+
+   ```html
+   <script
+     src="https://YOUR-BACKEND-HOST/widget.js"
+     data-api-url="https://YOUR-BACKEND-HOST"
+     data-client-id="cl_xxxxxxxxxxxxxxxx"
+   ></script>
+   ```
+
+There is deliberately no HTTP endpoint for adding clients — the script runs where the
+`DATABASE_URL` lives, by the operator only.
+
+### How isolation works
+
+- **Per-request resolution.** The client row is fetched from the database on every
+  request and passed down the entire call chain (`handleMessage` → tools → GraphQL)
+  as an explicit parameter. No module-level variable anywhere holds "the current
+  store", so concurrent requests from different clients cannot race into each
+  other's config.
+- **Origin ↔ client binding.** CORS preflights are answered for any *registered*
+  origin (preflights carry no body, so the client is unknown at that point), but the
+  actual request is checked against the specific client's `allowed_origin` — a
+  request claiming client A from client B's origin gets a 403, with the same body as
+  an unknown `client_id` so probing can't tell the two apart.
+- **Per-client token cache.** Shopify access tokens are cached in a Map keyed by
+  `client_id`, each refreshing independently — one client's expiry or credential
+  failure never touches another's.
+- **Namespaced sessions.** Conversation history is keyed by `client_id::sessionId`,
+  so identical sessionIds from different clients can never share history.
+- **No client fallback.** A missing `client_id` is a 400; an unknown one is a 403.
+  Nothing ever falls back to a default store in multi-tenant mode.
+
+### Dev-only single-store fallback
+
+With `DATABASE_URL` **unset**, the server runs the old single-store mode from the
+`SHOPIFY_*` env vars, and the widget may omit `data-client-id`. This mode is for
+local development only — never deploy it for real clients, and never set both a
+production `DATABASE_URL` and dev store vars expecting the env vars to win (they
+are ignored the moment `DATABASE_URL` is set).
+
+---
+
 ## Installing the widget on a Shopify store
 
 [public/widget.js](public/widget.js) is a self-contained chat widget — vanilla JS,
@@ -289,9 +358,11 @@ With the server running, open **http://localhost:3000/demo.html**. That page is 
 by the backend itself, so requests are same-origin and nothing is blocked. Use it to
 check the widget before touching a theme.
 
-The widget stores a random `sessionId` in `localStorage` on first load and sends it
-with every request, so a returning visitor keeps their conversation. Reset with
-`localStorage.clear()` in the browser console.
+The widget generates a fresh random `sessionId` on every page load and persists
+nothing in the browser — no stored transcript, no stored session. Refreshing the page
+always starts an empty conversation (deliberate: a shared or public computer never
+replays a previous visitor's chat). Conversation memory lives server-side for the
+duration of the session only.
 
 ### Add it to a theme
 
