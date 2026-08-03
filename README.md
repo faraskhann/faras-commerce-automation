@@ -336,6 +336,48 @@ There is deliberately no HTTP endpoint for adding clients — the script runs wh
 - **No client fallback.** A missing `client_id` is a 400; an unknown one is a 403.
   Nothing ever falls back to a default store in multi-tenant mode.
 
+### Demo mode: prospecting before Shopify access
+
+A prospect who hasn't granted API access yet can still get a working widget, running
+on a one-time snapshot of their **public** product catalogue:
+
+```powershell
+npm run add-demo-client -- --domain prospect-store.com
+```
+
+This scrapes `https://prospect-store.com/products.json` (paginated, 400 ms between
+pages, capped at 500 products — a polite scraper), normalizes it into the exact shape
+the live search produces, stores it in the client row's `demo_catalog`, and prints the
+widget snippet. Failure cases are reported distinctly: a password-protected storefront
+(detected by the redirect to `/password` — all Shopify dev stores are protected, so
+test against a real public store), a 404 (feed disabled or wrong domain), and network
+errors each get their own message.
+
+What a demo client can and can't do — the bot is honest about the difference:
+
+- **Product questions work** — same search, ranking, stemming, broadening, and
+  variant-attribute checking as live mode, just against the snapshot in memory.
+  (Storefront-visibility filtering doesn't apply; everything scraped was public.)
+- **Order tracking doesn't** — that data was never public. The tool returns a
+  structured `order_tracking_connected: false`, and the bot says in one natural
+  sentence that order tracking activates once the store connects its account, then
+  offers product help. It never invents order data and never plays out an error.
+
+### Upgrading a won prospect to live
+
+```powershell
+npm run upgrade-client -- --client-id cl_xxx --shopify-client-id <id> --shopify-client-secret <secret>
+```
+
+(Or pass the credentials via `UPGRADE_SHOPIFY_CLIENT_ID` / `UPGRADE_SHOPIFY_CLIENT_SECRET`
+env vars — npm echoes the command line, so flags land secrets in terminal history.)
+
+The command live-verifies the new credentials against the store's domain (a typo fails
+here, changing nothing), then sets the credentials, flips `mode` to `live`, and clears
+`demo_catalog`. **The `client_id` never changes** — a widget the prospect installed
+during evaluation keeps working with zero changes on their end, and starts answering
+real order questions the moment the command completes.
+
 ### Dev-only single-store fallback
 
 With `DATABASE_URL` **unset**, the server runs the old single-store mode from the

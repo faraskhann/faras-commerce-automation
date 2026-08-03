@@ -42,6 +42,10 @@ function toStore(row) {
     shopifyClientId: row.shopify_client_id,
     shopifyClientSecret: row.shopify_client_secret,
     adminToken: null,
+    // 'live' -> real Admin API calls; 'demo' -> in-memory scraped catalogue,
+    // no Shopify credentials, order lookups honestly declined.
+    mode: row.mode === "demo" ? "demo" : "live",
+    demoCatalog: row.demo_catalog ?? null,
     allowedOrigins: String(row.allowed_origin)
       .split(",")
       .map((o) => o.trim().replace(/\/+$/, ""))
@@ -52,7 +56,7 @@ function toStore(row) {
 /** Resolve one client row into a store object, or null when unknown. */
 export async function getClientById(clientId) {
   const result = await getPool().query(
-    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin from clients where client_id = $1",
+    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog from clients where client_id = $1",
     [clientId]
   );
   return result.rows[0] ? toStore(result.rows[0]) : null;

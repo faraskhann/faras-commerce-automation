@@ -221,6 +221,19 @@ function verificationFailure() {
  * reveals which part of the check failed.
  */
 export async function getOrderStatus(store, orderNumberInput, emailInput) {
+  // Demo clients run on a scraped public catalogue — order data was never
+  // public, so there is nothing to look up. Structured refusal, not an error,
+  // so Claude explains it truthfully instead of apologizing for a failure.
+  if (store.mode === "demo") {
+    return {
+      demo_mode: true,
+      order_tracking_connected: false,
+      message:
+        "This store's order tracking is not connected yet — it activates once the " +
+        "store connects its Shopify account. Product questions can still be answered.",
+    };
+  }
+
   const cleaned = stripQuotes(orderNumberInput);
   const email = String(emailInput ?? "").trim().toLowerCase();
 
@@ -506,6 +519,23 @@ async function runSingleKeywordSearch(store, keyword) {
 }
 
 /**
+ * Demo-mode equivalent of one keyword's Shopify search: word-prefix match
+ * against title, product type and tags of the scraped catalogue, mirroring the
+ * semantics of Shopify's `field:term*` so demo and live behave alike.
+ */
+function demoKeywordSearch(store, keyword) {
+  const catalogue = Array.isArray(store.demoCatalog) ? store.demoCatalog : [];
+  return catalogue
+    .filter((product) => {
+      const haystack = `${product.title} ${product.product_type ?? ""} ${(product.tags ?? []).join(" ")}`
+        .toLowerCase()
+        .split(/[^a-z0-9]+/);
+      return haystack.some((word) => word.startsWith(keyword));
+    })
+    .slice(0, MAX_PRODUCT_RESULTS);
+}
+
+/**
  * Search once per keyword and merge, ranking products that matched several
  * keywords above single-keyword matches, with round-robin interleaving as the
  * tie-break so every keyword keeps representation in the final 5.
@@ -513,10 +543,18 @@ async function runSingleKeywordSearch(store, keyword) {
  * A single combined OR query lets one dominant category flood the result cap:
  * "wax my snowboard" filled all 5 slots with snowboards and dropped the one
  * product the shopper actually wanted (the wax).
+ *
+ * Demo clients search their scraped catalogue in memory; live clients hit the
+ * Admin API. Everything downstream (broadening, attribute checks, pricing,
+ * grounding) is shared and cannot tell the difference.
  */
 async function runProductSearch(store, keywords) {
   const lists = await Promise.all(
-    keywords.slice(0, 6).map((keyword) => runSingleKeywordSearch(store, keyword))
+    keywords.slice(0, 6).map((keyword) =>
+      store.mode === "demo"
+        ? demoKeywordSearch(store, keyword)
+        : runSingleKeywordSearch(store, keyword)
+    )
   );
 
   const byTitle = new Map();

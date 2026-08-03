@@ -10,7 +10,9 @@
     "dev": "node --watch src/server.js",
     "seed:orders": "node scripts/create-test-orders.js",
     "migrate": "node scripts/migrate.js",
-    "add-client": "node scripts/add-client.js"
+    "add-client": "node scripts/add-client.js",
+    "add-demo-client": "node scripts/add-demo-client.js",
+    "upgrade-client": "node scripts/upgrade-client.js"
   },
   "engines": {
     "node": ">=20"
