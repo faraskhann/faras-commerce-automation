@@ -6,39 +6,59 @@
 <title>Admin — store chatbot</title>
 <style>
   :root {
-    --bg: #f3f4f6; --card: #ffffff; --ink: #111827; --muted: #6b7280;
+    --bg: #f3f4f6; --card: #fff; --ink: #111827; --muted: #6b7280;
     --line: #e5e7eb; --accent: #2563eb; --ok: #059669; --warn: #d97706; --bad: #b91c1c;
   }
   * { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
          background: var(--bg); color: var(--ink); margin: 0; padding: 24px; }
-  .wrap { max-width: 980px; margin: 0 auto; }
-  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+
+  /* Nothing renders until the server has confirmed an authenticated session:
+     no header, no "Log out", no section headings. A shell must never appear
+     to someone who is not logged in. */
+  #shell { display: none; }
+  #gate { color: var(--muted); font-size: 14px; padding: 40px 0; text-align: center; }
+  #gate.error { color: var(--bad); }
+
+  header { display: flex; justify-content: space-between; align-items: baseline;
+           margin-bottom: 6px; }
   h1 { font-size: 1.3rem; margin: 0; }
-  h2 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 28px 0 10px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; }
   a.logout { color: var(--muted); font-size: 14px; }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+
+  section { margin: 0 0 30px; }
+  section > h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: .06em;
+                 color: var(--muted); margin: 0 0 10px; padding-bottom: 6px;
+                 border-bottom: 1px solid var(--line); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
   .card .label { font-size: 13px; color: var(--muted); }
-  .card .value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; }
-  .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card .value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; line-height: 1.1; }
+  .card .sub2 { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
   .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
-  .chart-row { display: grid; grid-template-columns: 84px 1fr 40px; align-items: center; gap: 8px; margin: 3px 0; font-size: 12.5px; }
+  .chart-row { display: grid; grid-template-columns: 62px 1fr 34px; align-items: center;
+               gap: 8px; margin: 3px 0; font-size: 12.5px; }
   .chart-row .day { color: var(--muted); font-variant-numeric: tabular-nums; }
-  .chart-row .bar-track { background: #f1f5f9; border-radius: 4px; height: 18px; }
-  .chart-row .bar { background: var(--accent); border-radius: 4px; height: 100%; min-width: 2px; }
+  .bar-track { background: #f1f5f9; border-radius: 4px; height: 18px; }
+  .bar { background: var(--accent); border-radius: 4px; height: 100%; display: block; }
   .chart-row .n { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 16px; }
+  .metric .label { font-size: 13px; color: var(--muted); }
+  .metric .value { font-size: 1.35rem; font-weight: 700; margin-top: 2px; }
+  .metric .value.bad { color: var(--bad); }
+
   .health { border: 2px solid var(--line); }
   .health.flagged { border-color: var(--warn); background: #fffbeb; }
-  .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
-  .metric .label { font-size: 13px; color: var(--muted); }
-  .metric .value { font-size: 1.3rem; font-weight: 700; }
-  .metric .value.bad { color: var(--bad); }
-  .flag-note { margin: 12px 0 0; font-size: 13px; color: var(--warn); font-weight: 600; display: none; }
+  .flag-note { margin: 14px 0 0; font-size: 13px; color: #92400e; font-weight: 600; display: none; }
   .health.flagged .flag-note { display: block; }
+
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
-  th { text-align: left; color: var(--muted); font-size: 12.5px; text-transform: uppercase;
-       letter-spacing: .03em; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  th { text-align: left; color: var(--muted); font-size: 12px; text-transform: uppercase;
+       letter-spacing: .03em; padding: 10px; border-bottom: 1px solid var(--line); }
   td { padding: 10px; border-bottom: 1px solid var(--line); }
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: #f8fafc; }
@@ -46,94 +66,103 @@
   .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
   .badge.live { background: #d1fae5; color: var(--ok); }
   .badge.demo { background: #fef3c7; color: var(--warn); }
-  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: var(--muted); }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
+  .right { text-align: right; }
   #detail { display: none; }
   #detail .panel { border-left: 4px solid var(--accent); }
-  .detail-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .detail-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
   .detail-head button { border: 1px solid var(--line); background: #fff; border-radius: 8px;
                         padding: 5px 12px; font-size: 13px; cursor: pointer; }
-  .tools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
-  .loading, .error-note { color: var(--muted); font-size: 14px; }
-  .error-note { color: var(--bad); }
+  .empty { color: var(--muted); font-size: 13px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>Store chatbot — admin</h1>
-    <a class="logout" href="/admin/logout">Log out</a>
-  </header>
+  <div id="gate">Checking access…</div>
 
-  <div id="status" class="loading">Loading…</div>
+  <div id="shell">
+    <header>
+      <h1>Store chatbot — admin</h1>
+      <a class="logout" href="/admin/logout">Log out</a>
+    </header>
+    <p class="sub">All dates are America/Toronto calendar days.</p>
 
-  <div id="dash" style="display:none">
-    <h2>Overview</h2>
-    <div class="cards">
-      <div class="card"><div class="label">Clients</div><div class="value" id="c-clients">–</div><div class="sub" id="c-clients-split"></div></div>
-      <div class="card"><div class="label">Conversations, all time</div><div class="value" id="c-total">–</div></div>
-      <div class="card"><div class="label">Conversations today</div><div class="value" id="c-today">–</div><div class="sub">Toronto calendar day</div></div>
-      <div class="card"><div class="label">Conversations this week</div><div class="value" id="c-week">–</div><div class="sub">last 7 Toronto days</div></div>
-    </div>
-
-    <h2>Activity — conversations per day (last 14)</h2>
-    <div class="panel" id="chart"></div>
-
-    <h2>Tool usage</h2>
-    <div class="panel tools-grid" id="tools"></div>
-
-    <h2>Health &amp; security</h2>
-    <div class="panel health" id="health">
-      <div class="health-grid">
-        <div class="metric"><div class="label">Grounding retry rate</div><div class="value" id="h-retry">–</div></div>
-        <div class="metric"><div class="label">Grounding fallback rate</div><div class="value" id="h-fallback">–</div></div>
-        <div class="metric"><div class="label">Rate-limit hits</div><div class="value" id="h-ratelimit">–</div></div>
-        <div class="metric"><div class="label">Order verification failures</div><div class="value" id="h-verify">–</div></div>
+    <section>
+      <h2>Conversations</h2>
+      <div class="cards">
+        <div class="card"><div class="label">All time</div><div class="value" id="c-total">–</div></div>
+        <div class="card"><div class="label">Today</div><div class="value" id="c-today">–</div></div>
+        <div class="card"><div class="label">This week</div><div class="value" id="c-week">–</div><div class="sub2">last 7 days</div></div>
+        <div class="card"><div class="label">Clients</div><div class="value" id="c-clients">–</div><div class="sub2" id="c-clients-split"></div></div>
       </div>
-      <p class="flag-note">⚠ Grounding retry rate is above 15% — the model is drafting ungrounded replies often. Worth investigating the prompt or catalogue data.</p>
-    </div>
+      <div class="panel" style="margin-top:12px">
+        <div class="label" style="font-size:13px;color:var(--muted);margin-bottom:8px">14-day trend</div>
+        <div id="chart"></div>
+      </div>
+    </section>
 
-    <h2>Clients</h2>
-    <div class="panel" style="padding:0">
-      <table>
-        <thead><tr><th>Store</th><th>Mode</th><th>Client ID</th><th>Created</th><th style="text-align:right">Conversations</th></tr></thead>
-        <tbody id="client-rows"></tbody>
-      </table>
-    </div>
+    <section>
+      <h2>Tool usage</h2>
+      <div class="panel metrics-grid" id="tools"></div>
+    </section>
 
-    <div id="detail">
-      <h2 id="detail-title">Client detail</h2>
-      <div class="panel">
-        <div class="detail-head">
-          <strong id="detail-name"></strong>
-          <button type="button" onclick="hideDetail()">Close</button>
+    <section>
+      <h2>Health &amp; security</h2>
+      <div class="panel health" id="health">
+        <div class="metrics-grid">
+          <div class="metric"><div class="label">Grounding retry rate</div><div class="value" id="h-retry">–</div><div class="sub2 mono" id="h-retry-abs"></div></div>
+          <div class="metric"><div class="label">Grounding fallback rate</div><div class="value" id="h-fallback">–</div><div class="sub2 mono" id="h-fallback-abs"></div></div>
+          <div class="metric"><div class="label">Rate-limited requests</div><div class="value" id="h-ratelimit">–</div></div>
+          <div class="metric"><div class="label">Order verification failures</div><div class="value" id="h-verify">–</div></div>
         </div>
-        <div class="cards" style="margin-top:14px">
-          <div class="card"><div class="label">Conversations, all time</div><div class="value" id="d-total">–</div></div>
-          <div class="card"><div class="label">Today</div><div class="value" id="d-today">–</div></div>
-          <div class="card"><div class="label">This week</div><div class="value" id="d-week">–</div></div>
-        </div>
-        <h2>Per day (last 14)</h2>
-        <div id="d-chart"></div>
-        <h2>Tools &amp; health</h2>
-        <div class="health-grid">
-          <div class="metric"><div class="label">search_products</div><div class="value" id="d-search">0</div></div>
-          <div class="metric"><div class="label">get_order_status</div><div class="value" id="d-order">0</div></div>
-          <div class="metric"><div class="label">Retry rate</div><div class="value" id="d-retry">–</div></div>
-          <div class="metric"><div class="label">Verification failures</div><div class="value" id="d-verify">0</div></div>
+        <p class="flag-note" id="flag-note"></p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Clients</h2>
+      <div class="panel" style="padding:0">
+        <table>
+          <thead><tr><th>Store</th><th>Mode</th><th>Client ID</th><th>Created</th><th class="right">Conversations</th></tr></thead>
+          <tbody id="client-rows"></tbody>
+        </table>
+      </div>
+      <div id="detail" style="margin-top:16px">
+        <div class="panel">
+          <div class="detail-head">
+            <strong id="detail-name"></strong>
+            <button type="button" id="detail-close">Close</button>
+          </div>
+          <div class="cards">
+            <div class="card"><div class="label">Conversations, all time</div><div class="value" id="d-total">–</div></div>
+            <div class="card"><div class="label">Today</div><div class="value" id="d-today">–</div></div>
+            <div class="card"><div class="label">This week</div><div class="value" id="d-week">–</div></div>
+          </div>
+          <div style="margin-top:16px"><div class="label" style="font-size:13px;color:var(--muted);margin-bottom:8px">14-day trend</div><div id="d-chart"></div></div>
+          <div class="metrics-grid" style="margin-top:18px">
+            <div class="metric"><div class="label">search_products</div><div class="value" id="d-search">0</div></div>
+            <div class="metric"><div class="label">get_order_status</div><div class="value" id="d-order">0</div></div>
+            <div class="metric"><div class="label">Grounding retry rate</div><div class="value" id="d-retry">–</div></div>
+            <div class="metric"><div class="label">Verification failures</div><div class="value" id="d-verify">0</div></div>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
   </div>
 </div>
 
 <script>
   var RETRY_FLAG_THRESHOLD = 15;
-
   function $(id) { return document.getElementById(id); }
+  function pct(v) { return v == null ? "n/a" : v + "%"; }
 
   async function getJSON(url) {
-    var res = await fetch(url);
-    if (res.status === 401) { window.location = "/admin/login"; throw new Error("unauthenticated"); }
+    var res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+    // 401: session missing/expired. 404: this page was not served by the app
+    // (e.g. opened as a local file or via a preview server), so the API routes
+    // don't exist. Neither may leave a usable-looking dashboard on screen.
+    if (res.status === 401) { var e = new Error("unauthenticated"); e.code = 401; throw e; }
+    if (res.status === 404) { var e2 = new Error("api-missing"); e2.code = 404; throw e2; }
     if (!res.ok) throw new Error("HTTP " + res.status);
     return res.json();
   }
@@ -144,62 +173,85 @@
     perDay.forEach(function (d) {
       var row = document.createElement("div");
       row.className = "chart-row";
-      var pctWidth = d.n === 0 ? 0 : Math.max((d.n / max) * 100, 3);
-      row.innerHTML =
-        '<span class="day">' + d.day.slice(5) + "</span>" +
-        '<span class="bar-track">' + (d.n ? '<span class="bar" style="display:block;width:' + pctWidth + '%"></span>' : "") + "</span>" +
-        '<span class="n">' + d.n + "</span>";
+      var w = d.n === 0 ? 0 : Math.max((d.n / max) * 100, 3);
+      var day = document.createElement("span");
+      day.className = "day"; day.textContent = d.day.slice(5);
+      var track = document.createElement("span");
+      track.className = "bar-track";
+      if (d.n) { var bar = document.createElement("span"); bar.className = "bar"; bar.style.width = w + "%"; track.appendChild(bar); }
+      var n = document.createElement("span");
+      n.className = "n"; n.textContent = d.n;
+      row.appendChild(day); row.appendChild(track); row.appendChild(n);
       el.appendChild(row);
     });
   }
 
-  function pct(v) { return v == null ? "n/a" : v + "%"; }
+  function renderMetricList(el, entries) {
+    el.innerHTML = "";
+    if (!entries.length) { el.innerHTML = '<p class="empty">No tool calls recorded yet.</p>'; return; }
+    entries.forEach(function (e) {
+      var d = document.createElement("div");
+      d.className = "metric";
+      var l = document.createElement("div"); l.className = "label"; l.textContent = e[0];
+      var v = document.createElement("div"); v.className = "value"; v.textContent = e[1];
+      d.appendChild(l); d.appendChild(v);
+      el.appendChild(d);
+    });
+  }
 
   function renderOverview(m) {
-    $("c-clients").textContent = m.clients.total;
-    $("c-clients-split").textContent = m.clients.live + " live · " + m.clients.demo + " demo";
     $("c-total").textContent = m.totalConversations;
     $("c-today").textContent = m.conversationsToday;
     $("c-week").textContent = m.conversationsThisWeek;
+    $("c-clients").textContent = m.clients.total;
+    $("c-clients-split").textContent = m.clients.live + " live · " + m.clients.demo + " demo";
 
     renderChart($("chart"), m.perDay);
-
-    var tools = $("tools");
-    tools.innerHTML = "";
-    var entries = Object.keys(m.tools).length ? Object.entries(m.tools) : [["(no tool calls yet)", 0]];
-    entries.forEach(function (e) {
-      var div = document.createElement("div");
-      div.className = "metric";
-      div.innerHTML = '<div class="label"></div><div class="value"></div>';
-      div.querySelector(".label").textContent = e[0];
-      div.querySelector(".value").textContent = e[1];
-      tools.appendChild(div);
-    });
+    renderMetricList($("tools"), Object.entries(m.tools));
 
     $("h-retry").textContent = pct(m.retryRatePct);
+    $("h-retry-abs").textContent = m.groundingRetries + " of " + m.toolCalls + " tool calls";
     $("h-fallback").textContent = pct(m.fallbackRatePct);
+    $("h-fallback-abs").textContent = m.groundingFallbacks + " of " + m.toolCalls + " tool calls";
     $("h-ratelimit").textContent = m.rateLimited;
     $("h-verify").textContent = m.verificationFailed;
+
     var flagged = m.retryRatePct != null && m.retryRatePct > RETRY_FLAG_THRESHOLD;
     $("health").classList.toggle("flagged", flagged);
     $("h-retry").classList.toggle("bad", flagged);
+    $("flag-note").textContent = flagged
+      ? "⚠ Grounding retry rate is " + pct(m.retryRatePct) + ", above the " +
+        RETRY_FLAG_THRESHOLD + "% threshold. The model is drafting ungrounded replies often — " +
+        "worth checking the system prompt and catalogue data. Each retry is an extra API call."
+      : "";
   }
 
   function renderClients(clients) {
     var tbody = $("client-rows");
     tbody.innerHTML = "";
+    if (!clients.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty">No clients registered.</td></tr>';
+      return;
+    }
     clients.forEach(function (c) {
       var tr = document.createElement("tr");
-      tr.innerHTML =
-        "<td></td>" +
-        '<td><span class="badge ' + (c.mode === "live" ? "live" : "demo") + '">' + c.mode + "</span></td>" +
-        '<td class="mono"></td><td></td><td style="text-align:right"></td>';
-      tr.children[0].textContent = c.store_domain;
-      tr.children[2].textContent = c.client_id;
-      tr.children[3].textContent = String(c.created_at).slice(0, 10);
-      tr.children[4].textContent = c.conversations;
+      var cells = [c.store_domain, null, c.client_id, String(c.created_at).slice(0, 10), c.conversations];
+      cells.forEach(function (val, i) {
+        var td = document.createElement("td");
+        if (i === 1) {
+          var b = document.createElement("span");
+          b.className = "badge " + (c.mode === "live" ? "live" : "demo");
+          b.textContent = c.mode;
+          td.appendChild(b);
+        } else {
+          td.textContent = val;
+          if (i === 2) td.className = "mono";
+          if (i === 4) td.className = "right";
+        }
+        tr.appendChild(td);
+      });
       tr.addEventListener("click", function () {
-        document.querySelectorAll("tbody tr").forEach(function (r) { r.classList.remove("selected"); });
+        Array.prototype.forEach.call(tbody.children, function (r) { r.classList.remove("selected"); });
         tr.classList.add("selected");
         showDetail(c);
       });
@@ -208,35 +260,47 @@
   }
 
   async function showDetail(client) {
-    var m = await getJSON("/admin/api/clients/" + encodeURIComponent(client.client_id));
-    $("detail-name").textContent = client.store_domain + "  (" + client.client_id + ", " + client.mode + ")";
-    $("d-total").textContent = m.totalConversations;
-    $("d-today").textContent = m.conversationsToday;
-    $("d-week").textContent = m.conversationsThisWeek;
-    renderChart($("d-chart"), m.perDay);
-    $("d-search").textContent = m.tools.search_products || 0;
-    $("d-order").textContent = m.tools.get_order_status || 0;
-    $("d-retry").textContent = pct(m.retryRatePct);
-    $("d-verify").textContent = m.verificationFailed;
-    $("detail").style.display = "block";
-    $("detail").scrollIntoView({ behavior: "smooth" });
+    try {
+      var m = await getJSON("/admin/api/clients/" + encodeURIComponent(client.client_id));
+      $("detail-name").textContent = client.store_domain + " — " + client.client_id + " (" + client.mode + ")";
+      $("d-total").textContent = m.totalConversations;
+      $("d-today").textContent = m.conversationsToday;
+      $("d-week").textContent = m.conversationsThisWeek;
+      renderChart($("d-chart"), m.perDay);
+      $("d-search").textContent = m.tools.search_products || 0;
+      $("d-order").textContent = m.tools.get_order_status || 0;
+      $("d-retry").textContent = pct(m.retryRatePct);
+      $("d-verify").textContent = m.verificationFailed;
+      $("detail").style.display = "block";
+      $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch (e) { handleFailure(e); }
   }
 
-  function hideDetail() {
-    $("detail").style.display = "none";
-    document.querySelectorAll("tbody tr").forEach(function (r) { r.classList.remove("selected"); });
+  function handleFailure(e) {
+    if (e.code === 401) { window.location.replace("/admin/login"); return; }
+    $("shell").style.display = "none";
+    var gate = $("gate");
+    gate.className = "error";
+    gate.textContent = e.code === 404
+      ? "This page is not being served by the application (its API routes returned 404). " +
+        "Open the dashboard at /admin on the running server rather than opening the HTML file directly."
+      : "Failed to load dashboard: " + e.message;
   }
+
+  $("detail-close").addEventListener("click", function () {
+    $("detail").style.display = "none";
+    Array.prototype.forEach.call($("client-rows").children, function (r) { r.classList.remove("selected"); });
+  });
 
   (async function init() {
     try {
       var results = await Promise.all([getJSON("/admin/api/overview"), getJSON("/admin/api/clients")]);
       renderOverview(results[0]);
       renderClients(results[1].clients);
-      $("status").style.display = "none";
-      $("dash").style.display = "block";
+      $("gate").style.display = "none";
+      $("shell").style.display = "block";
     } catch (e) {
-      $("status").className = "error-note";
-      $("status").textContent = "Failed to load dashboard: " + e.message;
+      handleFailure(e);
     }
   })();
 </script>

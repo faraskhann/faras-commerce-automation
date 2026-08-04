@@ -54,11 +54,32 @@ function isAuthed(req) {
   return Boolean(expiresAt && expiresAt > Date.now());
 }
 
+/**
+ * True when the request reached us over HTTPS. Checks X-Forwarded-Proto directly
+ * as well as req.secure, so the Secure flag is still set behind Railway's proxy
+ * even if TRUST_PROXY was never configured.
+ */
+function isHttps(req) {
+  if (req.secure) return true;
+  const proto = String(req.headers["x-forwarded-proto"] ?? "").split(",")[0].trim();
+  return proto === "https";
+}
+
 function sessionCookie(req, token, maxAgeSec) {
-  // Secure only when the request actually came over HTTPS (Railway, with
-  // trust proxy on) — a Secure cookie would silently break plain-HTTP localhost.
-  const secure = req.secure ? "; Secure" : "";
-  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${secure}`;
+  // Secure only over HTTPS — a Secure cookie would silently break plain-HTTP
+  // localhost development.
+  const secure = isHttps(req) ? "; Secure" : "";
+  // Expires alongside Max-Age so older browsers also drop a cleared cookie.
+  const expires =
+    maxAgeSec === 0 ? "; Expires=Thu, 01 Jan 1970 00:00:00 GMT" : "";
+  return `${SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSec}${expires}${secure}`;
+}
+
+/** Admin responses must never be cached — a cached shell survives logout. */
+function noStore(res) {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, private");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
 }
 
 function loginPage(error) {
@@ -100,6 +121,7 @@ adminRouter.use("/admin", (req, res, next) => {
 });
 
 adminRouter.get("/admin/login", (req, res) => {
+  noStore(res);
   if (isAuthed(req)) return res.redirect("/admin");
   res.type("html").send(loginPage("error" in req.query));
 });
@@ -120,13 +142,19 @@ adminRouter.post(
 
 adminRouter.get("/admin/logout", (req, res) => {
   const token = parseCookies(req)[SESSION_COOKIE];
+  // Delete the server-side session first: even if the browser ignored the
+  // cookie clear, the token is dead and no longer grants access.
   if (token) sessions.delete(token);
+  noStore(res);
   res.setHeader("Set-Cookie", sessionCookie(req, "", 0));
   res.redirect("/admin/login");
 });
 
-// Auth gate for the dashboard page and all API routes.
+// Auth gate for the dashboard page and all API routes. Registered AFTER the
+// login/logout handlers (so those stay reachable) and BEFORE every route below,
+// which is what actually protects them.
 adminRouter.use("/admin", (req, res, next) => {
+  noStore(res);
   if (isAuthed(req)) return next();
   if (req.path.startsWith("/api")) {
     return res.status(401).json({ error: "Not authenticated." });
@@ -136,7 +164,13 @@ adminRouter.use("/admin", (req, res, next) => {
 
 // The dashboard page lives OUTSIDE public/ so the static middleware can never
 // serve it without passing through the auth gate above.
-adminRouter.get("/admin", (_req, res) => {
+//
+// The isAuthed() re-check is deliberate belt-and-braces: this route serves the
+// dashboard, and it must not become reachable if the middleware above is ever
+// reordered or its path prefix edited.
+adminRouter.get("/admin", (req, res) => {
+  if (!isAuthed(req)) return res.redirect("/admin/login");
+  noStore(res);
   res.sendFile(path.join(import.meta.dirname, "..", "views", "admin.html"));
 });
 
