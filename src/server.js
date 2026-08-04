@@ -105,8 +105,10 @@ async function resolveRequestStore(req) {
 
   // A browser request claiming this client must arrive from one of the origins
   // registered TO THIS CLIENT — another client's origin is rejected even though
-  // it would pass the generic preflight above.
-  if (origin && !store.allowedOrigins.includes(origin)) {
+  // it would pass the generic preflight above. The backend's own origin is also
+  // allowed: that's our demo page (demo.html?client=...), served by this server.
+  const selfOrigin = `${req.protocol}://${req.headers.host}`;
+  if (origin && origin !== selfOrigin && !store.allowedOrigins.includes(origin)) {
     console.warn(
       `[chat] origin/client mismatch: client ${store.clientKey} from origin ${origin}`
     );

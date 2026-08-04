@@ -348,7 +348,21 @@ npm run add-demo-client -- --domain prospect-store.com
 This scrapes `https://prospect-store.com/products.json` (paginated, 400 ms between
 pages, capped at 500 products — a polite scraper), normalizes it into the exact shape
 the live search produces, stores it in the client row's `demo_catalog`, and prints the
-widget snippet. Failure cases are reported distinctly: a password-protected storefront
+widget snippet.
+
+**Shareable demo link:** instead of (or before) installing the widget on their site,
+send the prospect a link to the hosted demo page:
+
+```
+https://YOUR-BACKEND-HOST/demo.html?client=<client_id>
+```
+
+Which store the page demos comes *only* from that `?client=` parameter — you tie a
+link to a prospect by generating it after `add-demo-client`. A link with no
+parameter shows "No demo specified" and loads nothing; a link with a deleted or
+mistyped client_id gets a friendly "this demo link isn't active" in the chat window.
+The page never falls back to another client's data, and it carries a "Powered by"
+footer so prospects know it's a demo, not the store's real site. Failure cases are reported distinctly: a password-protected storefront
 (detected by the redirect to `/password` — all Shopify dev stores are protected, so
 test against a real public store), a 404 (feed disabled or wrong domain), and network
 errors each get their own message.

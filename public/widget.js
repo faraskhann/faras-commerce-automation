@@ -36,6 +36,10 @@
   // backend; sent with every /chat request. Omit only against a single-store
   // dev backend.
   var CLIENT_ID = data.clientId || null;
+  // Optional friendlier message for 403s (unknown/inactive client). The demo
+  // page sets this so a dead demo link reads as "link isn't active", not as a
+  // scary generic error. Storefront installs normally leave it unset.
+  var INACTIVE_MESSAGE = data.inactiveMessage || null;
 
   // A fresh session on every page load, by design: nothing is persisted in
   // localStorage — no sessionId, no transcript — so a shared or public computer
@@ -265,11 +269,13 @@
       typing.remove();
 
       if (!response.ok) {
-        addMessage(
-          "error",
+        var errorText =
           (payload && payload.error) ||
-            "Sorry, something went wrong on our end. Please try again in a moment."
-        );
+          "Sorry, something went wrong on our end. Please try again in a moment.";
+        if (response.status === 403 && INACTIVE_MESSAGE) {
+          errorText = INACTIVE_MESSAGE;
+        }
+        addMessage("error", errorText);
       } else if (payload && payload.reply) {
         addMessage("bot", payload.reply);
       } else {
