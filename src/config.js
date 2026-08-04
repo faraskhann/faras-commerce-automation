@@ -88,6 +88,8 @@ export const config = {
   // collectively. Leave unset when the server is hit directly.
   trustProxy: process.env.TRUST_PROXY === "1" || process.env.TRUST_PROXY === "true",
   anthropicApiKey: required("ANTHROPIC_API_KEY"),
+  // Password for the /admin dashboard. Unset -> admin routes are disabled.
+  adminPassword: (process.env.ADMIN_PASSWORD || "").trim() || null,
   shopifyApiVersion: SHOPIFY_API_VERSION,
   model: "claude-haiku-4-5-20251001",
   // Cap on how many tool_use -> tool_result round trips one /chat call may run.

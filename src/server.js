@@ -10,6 +10,7 @@ import { rateLimit } from "./ratelimit.js";
 import { clearSession, sessionCount } from "./sessions.js";
 import { refreshAccessToken, usingClientCredentials } from "./token.js";
 import { getClientById, originIsRegistered } from "./db.js";
+import { adminRouter } from "./admin.js";
 
 export const app = express();
 
@@ -52,6 +53,10 @@ app.use(async (req, res, next) => {
 });
 
 app.use(express.json({ limit: "100kb" }));
+
+// Mounted before the static middleware so /admin can never be shadowed by a
+// file in public/; the dashboard page itself lives in views/, behind auth.
+app.use(adminRouter);
 
 // Serves widget.js and demo.html for local testing.
 app.use(express.static(path.join(import.meta.dirname, "..", "public")));

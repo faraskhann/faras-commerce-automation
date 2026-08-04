@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — store chatbot</title>
+<style>
+  :root {
+    --bg: #f3f4f6; --card: #ffffff; --ink: #111827; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #2563eb; --ok: #059669; --warn: #d97706; --bad: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         background: var(--bg); color: var(--ink); margin: 0; padding: 24px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 20px; }
+  h1 { font-size: 1.3rem; margin: 0; }
+  h2 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 28px 0 10px; }
+  a.logout { color: var(--muted); font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .card .label { font-size: 13px; color: var(--muted); }
+  .card .value { font-size: 1.7rem; font-weight: 700; margin-top: 4px; }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .chart-row { display: grid; grid-template-columns: 84px 1fr 40px; align-items: center; gap: 8px; margin: 3px 0; font-size: 12.5px; }
+  .chart-row .day { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .chart-row .bar-track { background: #f1f5f9; border-radius: 4px; height: 18px; }
+  .chart-row .bar { background: var(--accent); border-radius: 4px; height: 100%; min-width: 2px; }
+  .chart-row .n { text-align: right; font-variant-numeric: tabular-nums; }
+  .health { border: 2px solid var(--line); }
+  .health.flagged { border-color: var(--warn); background: #fffbeb; }
+  .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+  .metric .label { font-size: 13px; color: var(--muted); }
+  .metric .value { font-size: 1.3rem; font-weight: 700; }
+  .metric .value.bad { color: var(--bad); }
+  .flag-note { margin: 12px 0 0; font-size: 13px; color: var(--warn); font-weight: 600; display: none; }
+  .health.flagged .flag-note { display: block; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-size: 12.5px; text-transform: uppercase;
+       letter-spacing: .03em; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px; border-bottom: 1px solid var(--line); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody tr.selected { background: #eff6ff; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.live { background: #d1fae5; color: var(--ok); }
+  .badge.demo { background: #fef3c7; color: var(--warn); }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; color: var(--muted); }
+  #detail { display: none; }
+  #detail .panel { border-left: 4px solid var(--accent); }
+  .detail-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .detail-head button { border: 1px solid var(--line); background: #fff; border-radius: 8px;
+                        padding: 5px 12px; font-size: 13px; cursor: pointer; }
+  .tools-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+  .loading, .error-note { color: var(--muted); font-size: 14px; }
+  .error-note { color: var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Store chatbot — admin</h1>
+    <a class="logout" href="/admin/logout">Log out</a>
+  </header>
+
+  <div id="status" class="loading">Loading…</div>
+
+  <div id="dash" style="display:none">
+    <h2>Overview</h2>
+    <div class="cards">
+      <div class="card"><div class="label">Clients</div><div class="value" id="c-clients">–</div><div class="sub" id="c-clients-split"></div></div>
+      <div class="card"><div class="label">Conversations, all time</div><div class="value" id="c-total">–</div></div>
+      <div class="card"><div class="label">Conversations today</div><div class="value" id="c-today">–</div><div class="sub">Toronto calendar day</div></div>
+      <div class="card"><div class="label">Conversations this week</div><div class="value" id="c-week">–</div><div class="sub">last 7 Toronto days</div></div>
+    </div>
+
+    <h2>Activity — conversations per day (last 14)</h2>
+    <div class="panel" id="chart"></div>
+
+    <h2>Tool usage</h2>
+    <div class="panel tools-grid" id="tools"></div>
+
+    <h2>Health &amp; security</h2>
+    <div class="panel health" id="health">
+      <div class="health-grid">
+        <div class="metric"><div class="label">Grounding retry rate</div><div class="value" id="h-retry">–</div></div>
+        <div class="metric"><div class="label">Grounding fallback rate</div><div class="value" id="h-fallback">–</div></div>
+        <div class="metric"><div class="label">Rate-limit hits</div><div class="value" id="h-ratelimit">–</div></div>
+        <div class="metric"><div class="label">Order verification failures</div><div class="value" id="h-verify">–</div></div>
+      </div>
+      <p class="flag-note">⚠ Grounding retry rate is above 15% — the model is drafting ungrounded replies often. Worth investigating the prompt or catalogue data.</p>
+    </div>
+
+    <h2>Clients</h2>
+    <div class="panel" style="padding:0">
+      <table>
+        <thead><tr><th>Store</th><th>Mode</th><th>Client ID</th><th>Created</th><th style="text-align:right">Conversations</th></tr></thead>
+        <tbody id="client-rows"></tbody>
+      </table>
+    </div>
+
+    <div id="detail">
+      <h2 id="detail-title">Client detail</h2>
+      <div class="panel">
+        <div class="detail-head">
+          <strong id="detail-name"></strong>
+          <button type="button" onclick="hideDetail()">Close</button>
+        </div>
+        <div class="cards" style="margin-top:14px">
+          <div class="card"><div class="label">Conversations, all time</div><div class="value" id="d-total">–</div></div>
+          <div class="card"><div class="label">Today</div><div class="value" id="d-today">–</div></div>
+          <div class="card"><div class="label">This week</div><div class="value" id="d-week">–</div></div>
+        </div>
+        <h2>Per day (last 14)</h2>
+        <div id="d-chart"></div>
+        <h2>Tools &amp; health</h2>
+        <div class="health-grid">
+          <div class="metric"><div class="label">search_products</div><div class="value" id="d-search">0</div></div>
+          <div class="metric"><div class="label">get_order_status</div><div class="value" id="d-order">0</div></div>
+          <div class="metric"><div class="label">Retry rate</div><div class="value" id="d-retry">–</div></div>
+          <div class="metric"><div class="label">Verification failures</div><div class="value" id="d-verify">0</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  var RETRY_FLAG_THRESHOLD = 15;
+
+  function $(id) { return document.getElementById(id); }
+
+  async function getJSON(url) {
+    var res = await fetch(url);
+    if (res.status === 401) { window.location = "/admin/login"; throw new Error("unauthenticated"); }
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
+  function renderChart(el, perDay) {
+    var max = Math.max.apply(null, perDay.map(function (d) { return d.n; }).concat([1]));
+    el.innerHTML = "";
+    perDay.forEach(function (d) {
+      var row = document.createElement("div");
+      row.className = "chart-row";
+      var pctWidth = d.n === 0 ? 0 : Math.max((d.n / max) * 100, 3);
+      row.innerHTML =
+        '<span class="day">' + d.day.slice(5) + "</span>" +
+        '<span class="bar-track">' + (d.n ? '<span class="bar" style="display:block;width:' + pctWidth + '%"></span>' : "") + "</span>" +
+        '<span class="n">' + d.n + "</span>";
+      el.appendChild(row);
+    });
+  }
+
+  function pct(v) { return v == null ? "n/a" : v + "%"; }
+
+  function renderOverview(m) {
+    $("c-clients").textContent = m.clients.total;
+    $("c-clients-split").textContent = m.clients.live + " live · " + m.clients.demo + " demo";
+    $("c-total").textContent = m.totalConversations;
+    $("c-today").textContent = m.conversationsToday;
+    $("c-week").textContent = m.conversationsThisWeek;
+
+    renderChart($("chart"), m.perDay);
+
+    var tools = $("tools");
+    tools.innerHTML = "";
+    var entries = Object.keys(m.tools).length ? Object.entries(m.tools) : [["(no tool calls yet)", 0]];
+    entries.forEach(function (e) {
+      var div = document.createElement("div");
+      div.className = "metric";
+      div.innerHTML = '<div class="label"></div><div class="value"></div>';
+      div.querySelector(".label").textContent = e[0];
+      div.querySelector(".value").textContent = e[1];
+      tools.appendChild(div);
+    });
+
+    $("h-retry").textContent = pct(m.retryRatePct);
+    $("h-fallback").textContent = pct(m.fallbackRatePct);
+    $("h-ratelimit").textContent = m.rateLimited;
+    $("h-verify").textContent = m.verificationFailed;
+    var flagged = m.retryRatePct != null && m.retryRatePct > RETRY_FLAG_THRESHOLD;
+    $("health").classList.toggle("flagged", flagged);
+    $("h-retry").classList.toggle("bad", flagged);
+  }
+
+  function renderClients(clients) {
+    var tbody = $("client-rows");
+    tbody.innerHTML = "";
+    clients.forEach(function (c) {
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td></td>" +
+        '<td><span class="badge ' + (c.mode === "live" ? "live" : "demo") + '">' + c.mode + "</span></td>" +
+        '<td class="mono"></td><td></td><td style="text-align:right"></td>';
+      tr.children[0].textContent = c.store_domain;
+      tr.children[2].textContent = c.client_id;
+      tr.children[3].textContent = String(c.created_at).slice(0, 10);
+      tr.children[4].textContent = c.conversations;
+      tr.addEventListener("click", function () {
+        document.querySelectorAll("tbody tr").forEach(function (r) { r.classList.remove("selected"); });
+        tr.classList.add("selected");
+        showDetail(c);
+      });
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function showDetail(client) {
+    var m = await getJSON("/admin/api/clients/" + encodeURIComponent(client.client_id));
+    $("detail-name").textContent = client.store_domain + "  (" + client.client_id + ", " + client.mode + ")";
+    $("d-total").textContent = m.totalConversations;
+    $("d-today").textContent = m.conversationsToday;
+    $("d-week").textContent = m.conversationsThisWeek;
+    renderChart($("d-chart"), m.perDay);
+    $("d-search").textContent = m.tools.search_products || 0;
+    $("d-order").textContent = m.tools.get_order_status || 0;
+    $("d-retry").textContent = pct(m.retryRatePct);
+    $("d-verify").textContent = m.verificationFailed;
+    $("detail").style.display = "block";
+    $("detail").scrollIntoView({ behavior: "smooth" });
+  }
+
+  function hideDetail() {
+    $("detail").style.display = "none";
+    document.querySelectorAll("tbody tr").forEach(function (r) { r.classList.remove("selected"); });
+  }
+
+  (async function init() {
+    try {
+      var results = await Promise.all([getJSON("/admin/api/overview"), getJSON("/admin/api/clients")]);
+      renderOverview(results[0]);
+      renderClients(results[1].clients);
+      $("status").style.display = "none";
+      $("dash").style.display = "block";
+    } catch (e) {
+      $("status").className = "error-note";
+      $("status").textContent = "Failed to load dashboard: " + e.message;
+    }
+  })();
+</script>
+</body>
+</html>

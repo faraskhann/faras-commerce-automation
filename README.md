@@ -431,6 +431,19 @@ counts.
 (`timestamptz`); only the report converts, using Postgres's timezone conversion —
 which tracks the EST/EDT shift correctly, unlike a fixed UTC offset.
 
+**Admin dashboard:** the same numbers, visual, at `https://YOUR-BACKEND-HOST/admin`.
+Protected by a single shared password: set `ADMIN_PASSWORD` in the environment (in
+Railway, a long random value — `openssl rand -base64 24`; never commit a real one).
+With it unset, every `/admin` route answers 503. Log in at `/admin/login`; the session
+is an httpOnly cookie (Secure over HTTPS), valid 7 days, one shared password, no user
+accounts. The dashboard shows overview cards (clients live/demo, conversations
+all-time / today / this week), a 14-day activity chart, tool usage, a health &
+security card — the grounding retry rate is visually flagged above 15%, since a high
+rate signals a prompt or data problem — and a clients table where clicking a row
+drills into that client's own breakdown. Query logic is shared with the CLI
+([src/metrics.js](src/metrics.js)), so the two can never disagree. Same Toronto-day
+semantics as the CLI.
+
 **Wiping test noise for one client:**
 
 ```powershell
