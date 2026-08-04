@@ -404,6 +404,7 @@ Current event types:
 | Event | When |
 | --- | --- |
 | `conversation_started` | First message of a new sessionId (in-memory sessions, so a conversation resuming across a server restart counts again) |
+| `reply_generated` | Each completed assistant reply — the denominator for grounding rates |
 | `tool_call` | Each tool invocation, with `{tool: "search_products" \| "get_order_status"}` |
 | `grounding_retry` / `grounding_fallback` | The grounding checker rejected a draft / gave up after retries |
 | `rate_limited` | The rate limiter rejected a request (client_id as claimed in the body, unverified) |
@@ -423,9 +424,14 @@ npm run metrics -- --days 14             # longer window
 ```
 
 Shows all-time conversations, a per-day conversation chart, tool usage breakdown,
-grounding retry/fallback rates as a percentage of tool calls (a high rate signals a
-prompt or data problem worth investigating), and rate-limit / verification-failure
-counts.
+grounding retry/fallback rates (a high rate signals a prompt or data problem worth
+investigating), and rate-limit / verification-failure counts.
+
+**Grounding rates are measured per reply, not per tool call.** A single turn can
+retry twice, and a turn that called no tool can still retry, so dividing by tool
+calls once produced an impossible 116% "rate". Because `reply_generated` was added
+later than the other events, the percentage is measured from the first recorded
+reply onward; all-time absolute counts are shown alongside it.
 
 **"Day" means an America/Toronto calendar day**, not UTC. Storage is UTC
 (`timestamptz`); only the report converts, using Postgres's timezone conversion —

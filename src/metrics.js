@@ -64,7 +64,7 @@ export async function overviewMetrics({ clientId = null, days = 14 } = {}) {
     pool.query(
       `select event_type, count(*)::int as n
        from events
-       where event_type in ('tool_call', 'grounding_retry', 'grounding_fallback', 'rate_limited', 'order_verification_failed')
+       where event_type in ('tool_call', 'reply_generated', 'grounding_retry', 'grounding_fallback', 'rate_limited', 'order_verification_failed')
          ${clientFilter}
        group by 1`,
       params
@@ -81,9 +81,41 @@ export async function overviewMetrics({ clientId = null, days = 14 } = {}) {
   const perDay = previousDays(today, days).map((day) => ({ day, n: byDay.get(day) ?? 0 }));
 
   const toolCalls = count("tool_call");
+  const replies = count("reply_generated");
+
+  // Retries are per drafted reply, NOT per tool call: one turn can retry twice,
+  // and a turn that called no tool can still retry. Dividing by tool calls once
+  // produced a nonsensical 116% "rate", so replies are the denominator.
+  //
+  // reply_generated was added after some events already existed, so the rate is
+  // measured only from the first reply onwards — otherwise historic retries
+  // divide by a denominator that was never recorded for them. Absolute
+  // all-time counts are still reported alongside.
+  const sinceRes = await pool.query(
+    `select min(created_at) as since from events
+     where event_type = 'reply_generated' ${clientFilter}`,
+    params
+  );
+  const since = sinceRes.rows[0].since;
+
+  const windowed = since
+    ? await pool.query(
+        `select event_type, count(*)::int as n from events
+         where event_type in ('grounding_retry','grounding_fallback')
+           and created_at >= ${p(1)} ${clientFilter}
+         group by 1`,
+        [...params, since]
+      )
+    : { rows: [] };
+  const windowedCount = (type) => windowed.rows.find((r) => r.event_type === type)?.n ?? 0;
+
   const retries = count("grounding_retry");
   const fallbacks = count("grounding_fallback");
-  const pct = (n) => (toolCalls ? Number(((n / toolCalls) * 100).toFixed(1)) : null);
+  const denominator = replies || toolCalls;
+  const rateNumerator = since
+    ? { retries: windowedCount("grounding_retry"), fallbacks: windowedCount("grounding_fallback") }
+    : { retries, fallbacks };
+  const pct = (n) => (denominator ? Number(((n / denominator) * 100).toFixed(1)) : null);
 
   return {
     today,
@@ -93,10 +125,17 @@ export async function overviewMetrics({ clientId = null, days = 14 } = {}) {
     perDay,
     tools: Object.fromEntries(tools.rows.map((r) => [r.tool ?? "unknown", r.n])),
     toolCalls,
+    replies,
+    // What the retry/fallback percentages are measured against.
+    groundingDenominator: denominator,
+    groundingDenominatorLabel: replies ? "replies" : "tool calls",
     groundingRetries: retries,
     groundingFallbacks: fallbacks,
-    retryRatePct: pct(retries),
-    fallbackRatePct: pct(fallbacks),
+    // Numerators used for the percentages (window-matched to the denominator).
+    groundingRetriesInWindow: rateNumerator.retries,
+    groundingFallbacksInWindow: rateNumerator.fallbacks,
+    retryRatePct: pct(rateNumerator.retries),
+    fallbackRatePct: pct(rateNumerator.fallbacks),
     rateLimited: count("rate_limited"),
     verificationFailed: count("order_verification_failed"),
   };

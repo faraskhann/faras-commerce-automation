@@ -210,9 +210,9 @@
     renderMetricList($("tools"), Object.entries(m.tools));
 
     $("h-retry").textContent = pct(m.retryRatePct);
-    $("h-retry-abs").textContent = m.groundingRetries + " of " + m.toolCalls + " tool calls";
+    $("h-retry-abs").textContent = m.groundingRetriesInWindow + " of " + m.groundingDenominator + " " + m.groundingDenominatorLabel;
     $("h-fallback").textContent = pct(m.fallbackRatePct);
-    $("h-fallback-abs").textContent = m.groundingFallbacks + " of " + m.toolCalls + " tool calls";
+    $("h-fallback-abs").textContent = m.groundingFallbacksInWindow + " of " + m.groundingDenominator + " " + m.groundingDenominatorLabel;
     $("h-ratelimit").textContent = m.rateLimited;
     $("h-verify").textContent = m.verificationFailed;
 

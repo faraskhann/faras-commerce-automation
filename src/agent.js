@@ -330,11 +330,13 @@ export async function handleMessage({ store, sessionId, message }) {
         const saved = messages.filter((m) => !rejectedMessages.has(m));
         saved.push({ role: "assistant", content: GROUNDING_FALLBACK_REPLY });
         setHistory(sessionKey, saved);
+        logEvent(store.clientKey, "reply_generated");
         return { reply: GROUNDING_FALLBACK_REPLY, stopReason: "grounding_failure" };
       }
 
       // Clean reply — save history without any rejected draft/corrective pairs.
       setHistory(sessionKey, messages.filter((m) => !rejectedMessages.has(m)));
+      logEvent(store.clientKey, "reply_generated");
       return { reply: text, stopReason: response.stop_reason };
     }
 
@@ -364,6 +366,7 @@ export async function handleMessage({ store, sessionId, message }) {
   const saved = messages.filter((m) => !rejectedMessages.has(m));
   saved.push({ role: "assistant", content: bailReply });
   setHistory(sessionKey, saved);
+  logEvent(store.clientKey, "reply_generated");
   console.warn(`[agent] session ${sessionId} hit the tool-round limit`);
   return { reply: bailReply, stopReason: "tool_round_limit" };
 }

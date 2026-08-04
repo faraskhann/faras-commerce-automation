@@ -110,18 +110,74 @@ function candidatePasses(candidate, grounding) {
 }
 
 /**
+ * A candidate is a formatting label, not a product claim, when it begins a line
+ * (after any bullet or bold markers) and is immediately followed by a colon:
+ *
+ *     **Order Summary:**            **Track your shipment:**
+ *     - Shipped via: UPS            **Tracking Information:**
+ *
+ * Models format order replies this way constantly, and the label words
+ * ("summary", "shipment", "information") never appear in the tool JSON, so every
+ * one of them used to be reported as an invented product name.
+ *
+ * Position matters: the colon must terminate a line-initial label. A colon in
+ * running prose — "I recommend The Collection Snowboard: Hydrogen" — is left
+ * alone, so genuine names containing colons are still verified.
+ */
+function isFormattingLabel(text, start, end) {
+  const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+  const before = text.slice(lineStart, start);
+  if (!/^[\s>*_\-–—]*(?:\d+[.)]\s*)?[\s*_]*$/.test(before)) return false;
+
+  const after = text.slice(end, end + 3);
+  return /^\s*:/.test(after) || /:\s*$/.test(text.slice(start, end));
+}
+
+// Connector words that may stay lowercase inside a genuine product name
+// ("Bed of Roses Candle", "Salt and Stone Balm").
+const NAME_CONNECTORS = new Set(["of", "and", "for", "the", "with", "&", "à", "de"]);
+
+/**
+ * A markdown link label that reads as a call to action — "See it here",
+ * "Track your shipment", "View product" — rather than a product name.
+ *
+ * Product names are Title Case; CTAs are sentence case, so a lowercase word
+ * after the first (excluding connectors) marks it as a CTA. Skipping these
+ * costs no safety: the link's URL is verified separately against the tool data,
+ * so a link to a product that was never returned is still caught. An invented
+ * Title Case name in a label ("[Alpine Wool Hoodie](…)") is still checked.
+ */
+function isCallToActionLabel(value) {
+  const words = String(value).trim().split(/\s+/);
+  if (words.length < 2) return false;
+  return words
+    .slice(1)
+    .some((word) => /^[a-z]/.test(word) && !NAME_CONNECTORS.has(word.toLowerCase()));
+}
+
+/**
  * Product-like mentions in a reply: bold spans, markdown link labels, URLs, and
  * Title Case phrases of two or more words (catches unformatted product names).
+ * Line-initial labels ending in a colon are skipped — see isFormattingLabel.
  */
 function extractCandidates(reply) {
   const text = String(reply);
   const candidates = [];
 
+  const push = (kind, value, match, inner) => {
+    // For bold/link candidates the wrapper markup is part of match[0]; measure
+    // the label's own span so the colon test looks just past it.
+    const start = match.index + (inner ? match[0].indexOf(inner) : 0);
+    const end = start + (inner ?? match[0]).length;
+    if (kind !== "url" && isFormattingLabel(text, start, end)) return;
+    candidates.push({ kind, value });
+  };
+
   for (const match of text.matchAll(/\*\*([^*\n]+)\*\*/g)) {
-    candidates.push({ kind: "bold", value: match[1] });
+    push("bold", match[1], match, match[1]);
   }
   for (const match of text.matchAll(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
-    candidates.push({ kind: "link-label", value: match[1] });
+    if (!isCallToActionLabel(match[1])) push("link-label", match[1], match, match[1]);
   }
   for (const match of text.matchAll(/https?:\/\/[^\s<>"')\]]+/g)) {
     candidates.push({ kind: "url", value: match[0].replace(/[.,;:!?]+$/, "") });
@@ -129,7 +185,7 @@ function extractCandidates(reply) {
   for (const match of text.matchAll(
     /\b(?:The\s+)?[A-Z][a-z0-9'-]+(?:\s+(?:of|and|for)\s+|\s+)(?:[A-Z][a-z0-9'-]+)(?:\s+[A-Z][a-z0-9'-]+)*/g
   )) {
-    candidates.push({ kind: "title-case", value: match[0] });
+    push("title-case", match[0], match, null);
   }
 
   return candidates;

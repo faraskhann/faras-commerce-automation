@@ -40,9 +40,11 @@ if (!toolEntries.length) console.log("  (no tool calls recorded)");
 for (const [tool, n] of toolEntries) console.log(`  ${tool.padEnd(20)} ${n}`);
 
 const pct = (v) => (v == null ? "n/a" : `${v}%`);
-console.log("\nGrounding (as % of tool calls — high rates signal a prompt or data problem):");
-console.log(`  retries:   ${m.groundingRetries} (${pct(m.retryRatePct)})`);
-console.log(`  fallbacks: ${m.groundingFallbacks} (${pct(m.fallbackRatePct)})`);
+console.log(
+  `\nGrounding (as % of ${m.groundingDenominatorLabel} — high rates signal a prompt or data problem):`
+);
+console.log(`  retries:   ${m.groundingRetriesInWindow} (${pct(m.retryRatePct)})   [all-time: ${m.groundingRetries}]`);
+console.log(`  fallbacks: ${m.groundingFallbacksInWindow} (${pct(m.fallbackRatePct)})   [all-time: ${m.groundingFallbacks}]`);
 
 console.log("\nAbuse / security signals:");
 console.log(`  rate-limit hits:              ${m.rateLimited}`);
