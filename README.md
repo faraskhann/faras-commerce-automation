@@ -378,6 +378,54 @@ here, changing nothing), then sets the credentials, flips `mode` to `live`, and 
 during evaluation keeps working with zero changes on their end, and starts answering
 real order questions the moment the command completes.
 
+### Internal metrics
+
+Every request writes lightweight events to the `events` table (multi-tenant mode
+only; the dev single-store mode logs nothing). Writes are fire-and-forget — a
+metrics failure is a console line, never a slower or broken chat reply. No PII goes
+into event metadata.
+
+Current event types:
+
+| Event | When |
+| --- | --- |
+| `conversation_started` | First message of a new sessionId (in-memory sessions, so a conversation resuming across a server restart counts again) |
+| `tool_call` | Each tool invocation, with `{tool: "search_products" \| "get_order_status"}` |
+| `grounding_retry` / `grounding_fallback` | The grounding checker rejected a draft / gave up after retries |
+| `rate_limited` | The rate limiter rejected a request (client_id as claimed in the body, unverified) |
+| `order_verification_failed` | An order number + email pair was actually attempted and failed — a security signal, not just a support one |
+
+`event_type` is free text on purpose: planned future events (e.g.
+`abandoned_cart_email_sent` once that feature exists) use this same table with no
+schema change. Indexes on `(client_id, created_at)` and `(event_type, created_at)`
+keep the summaries fast as it grows.
+
+**Reading the numbers:**
+
+```powershell
+npm run metrics                          # all clients, last 7 days
+npm run metrics -- --client-id cl_xxx    # one client
+npm run metrics -- --days 14             # longer window
+```
+
+Shows all-time conversations, a per-day conversation chart, tool usage breakdown,
+grounding retry/fallback rates as a percentage of tool calls (a high rate signals a
+prompt or data problem worth investigating), and rate-limit / verification-failure
+counts.
+
+**"Day" means an America/Toronto calendar day**, not UTC. Storage is UTC
+(`timestamptz`); only the report converts, using Postgres's timezone conversion —
+which tracks the EST/EDT shift correctly, unlike a fixed UTC offset.
+
+**Wiping test noise for one client:**
+
+```powershell
+npm run clear-metrics -- --client-id cl_xxx
+```
+
+Deletes that client's events only and prints the row count. `--client-id` is
+mandatory by design — a global wipe is intentionally not supported.
+
 ### Dev-only single-store fallback
 
 With `DATABASE_URL` **unset**, the server runs the old single-store mode from the

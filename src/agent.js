@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import { getOrderStatus, searchProducts, ShopifyError } from "./shopify.js";
 import { collectGrounding, verifyReplyGrounding } from "./grounding.js";
 import { getHistory, setHistory } from "./sessions.js";
+import { logEvent } from "./events.js";
 
 const client = new Anthropic({ apiKey: config.anthropicApiKey });
 
@@ -205,6 +206,8 @@ async function runTool(store, toolUse) {
     }
   }
 
+  logEvent(store.clientKey, "tool_call", { tool: toolUse.name });
+
   try {
     const result = await handler.run(store, toolUse.input);
     return { content: JSON.stringify(result), isError: false, payload: result };
@@ -266,7 +269,16 @@ export async function handleMessage({ store, sessionId, message }) {
   // Sessions are namespaced by client so the same sessionId arriving from two
   // different clients can never share (or leak) conversation history.
   const sessionKey = `${store.clientKey}::${sessionId}`;
-  const messages = [...getHistory(sessionKey), { role: "user", content: message }];
+  const history = getHistory(sessionKey);
+
+  // First message of a session = one conversation. (Sessions live in memory, so
+  // a conversation resuming across a server restart counts again — acceptable
+  // noise for an internal metric.)
+  if (history.length === 0) {
+    logEvent(store.clientKey, "conversation_started");
+  }
+
+  const messages = [...history, { role: "user", content: message }];
 
   // Parsed payloads of every successful tool call in THIS turn — the only data a
   // reply is allowed to reference.
@@ -296,6 +308,7 @@ export async function handleMessage({ store, sessionId, message }) {
 
       if (violations.length && groundingRetries < MAX_GROUNDING_RETRIES) {
         groundingRetries += 1;
+        logEvent(store.clientKey, "grounding_retry", { violations: violations.length });
         console.warn(
           `[grounding] rejected draft for session ${sessionId} ` +
             `(attempt ${groundingRetries}): ${violations.join("; ")}`
@@ -308,6 +321,7 @@ export async function handleMessage({ store, sessionId, message }) {
       }
 
       if (violations.length) {
+        logEvent(store.clientKey, "grounding_fallback", { violations: violations.length });
         console.error(
           `[grounding] retries exhausted for session ${sessionId}; ` +
             `sending fallback. Violations: ${violations.join("; ")}`

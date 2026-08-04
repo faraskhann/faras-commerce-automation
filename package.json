@@ -12,7 +12,9 @@
     "migrate": "node scripts/migrate.js",
     "add-client": "node scripts/add-client.js",
     "add-demo-client": "node scripts/add-demo-client.js",
-    "upgrade-client": "node scripts/upgrade-client.js"
+    "upgrade-client": "node scripts/upgrade-client.js",
+    "metrics": "node scripts/metrics.js",
+    "clear-metrics": "node scripts/clear-metrics.js"
   },
   "engines": {
     "node": ">=20"

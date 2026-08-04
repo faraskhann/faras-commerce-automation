@@ -1,4 +1,5 @@
 import { graphqlUrlFor } from "./config.js";
+import { logEvent } from "./events.js";
 import {
   getAccessToken,
   invalidateAccessToken,
@@ -255,6 +256,11 @@ export async function getOrderStatus(store, orderNumberInput, emailInput) {
 
   const orderEmail = String(order?.email ?? "").trim().toLowerCase();
   if (!order || !orderEmail || orderEmail !== email) {
+    // A real attempt (both inputs present) that failed to verify — security-
+    // relevant, worth counting. The metadata stays PII-free by design.
+    logEvent(store.clientKey, "order_verification_failed", {
+      order_found: Boolean(order),
+    });
     return verificationFailure();
   }
 

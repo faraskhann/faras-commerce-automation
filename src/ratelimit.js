@@ -7,6 +7,8 @@
  * instance.
  */
 
+import { logEvent } from "./events.js";
+
 const WINDOW_MS = 60_000;
 
 const buckets = new Map();
@@ -51,6 +53,13 @@ export function rateLimit({ perIpPerMinute, perSessionPerMinute }) {
       : true;
 
     if (!ipOk || !sessionOk) {
+      // Runs before client resolution, so the client_id is the (unverified)
+      // one claimed in the body — good enough for an internal abuse metric.
+      const claimedClient =
+        typeof req.body?.client_id === "string" ? req.body.client_id : "__unknown";
+      logEvent(claimedClient, "rate_limited", {
+        limited_by: !ipOk ? "ip" : "session",
+      });
       return res
         .status(429)
         .json({ error: "Too many requests — please wait a moment and try again." });
