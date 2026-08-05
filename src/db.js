@@ -1,6 +1,7 @@
 import pg from "pg";
 
 import { config } from "./config.js";
+import { featuresForTier, DEFAULT_TIER } from "./features.js";
 
 /**
  * Client registry access. Every request in multi-tenant mode resolves its
@@ -46,6 +47,10 @@ function toStore(row) {
     // no Shopify credentials, order lookups honestly declined.
     mode: row.mode === "demo" ? "demo" : "live",
     demoCatalog: row.demo_catalog ?? null,
+    tier: row.tier ?? DEFAULT_TIER,
+    // Resolved once per request so downstream code checks
+    // store.features.<name> instead of re-deriving from the tier.
+    features: featuresForTier(row.tier ?? DEFAULT_TIER),
     allowedOrigins: String(row.allowed_origin)
       .split(",")
       .map((o) => o.trim().replace(/\/+$/, ""))
@@ -56,10 +61,21 @@ function toStore(row) {
 /** Resolve one client row into a store object, or null when unknown. */
 export async function getClientById(clientId) {
   const result = await getPool().query(
-    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog from clients where client_id = $1",
+    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog, tier from clients where client_id = $1",
     [clientId]
   );
   return result.rows[0] ? toStore(result.rows[0]) : null;
+}
+
+/**
+ * Every client whose tier grants `featureName`, as resolved store objects.
+ * The gate lives here (one place) rather than in each background job.
+ */
+export async function listClientsWithFeature(featureName) {
+  const result = await getPool().query(
+    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog, tier from clients"
+  );
+  return result.rows.map(toStore).filter((store) => store.features[featureName] === true);
 }
 
 /**

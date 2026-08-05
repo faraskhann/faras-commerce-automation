@@ -90,6 +90,22 @@ export const config = {
   anthropicApiKey: required("ANTHROPIC_API_KEY"),
   // Password for the /admin dashboard. Unset -> admin routes are disabled.
   adminPassword: (process.env.ADMIN_PASSWORD || "").trim() || null,
+  email: {
+    postmarkToken: (process.env.POSTMARK_SERVER_TOKEN || "").trim() || null,
+    from: (process.env.EMAIL_FROM || "").trim() || null,
+    // Cart recovery is promotional; keep it off any transactional stream.
+    messageStream: (process.env.POSTMARK_MESSAGE_STREAM || "broadcast").trim(),
+  },
+  abandonedCart: {
+    // Minutes between polls. Shopify marks a checkout abandoned well before
+    // the first email goes out at 1h, so 20 minutes is ample.
+    pollMinutes: Number(process.env.ABANDONED_CART_POLL_MINUTES) || 20,
+    discountCode: (process.env.ABANDONED_CART_DISCOUNT_CODE || "").trim() || null,
+    // Signs unsubscribe links so they can't be forged or enumerated.
+    unsubscribeSecret: (process.env.UNSUBSCRIBE_SECRET || "").trim() || null,
+  },
+  // Public origin used to build links in emails (e.g. https://app.up.railway.app).
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || "").trim().replace(/\/+$/, "") || null,
   shopifyApiVersion: SHOPIFY_API_VERSION,
   model: "claude-haiku-4-5-20251001",
   // Cap on how many tool_use -> tool_result round trips one /chat call may run.

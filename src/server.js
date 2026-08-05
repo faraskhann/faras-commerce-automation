@@ -11,6 +11,11 @@ import { clearSession, sessionCount } from "./sessions.js";
 import { refreshAccessToken, usingClientCredentials } from "./token.js";
 import { getClientById, originIsRegistered } from "./db.js";
 import { adminRouter } from "./admin.js";
+import {
+  startAbandonedCartPoller,
+  unsubscribeEmail,
+  unsubscribeToken,
+} from "./abandoned-cart.js";
 
 export const app = express();
 
@@ -171,6 +176,44 @@ app.delete("/chat/:sessionId", async (req, res) => {
   res.json({ cleared: existed });
 });
 
+/**
+ * One-click unsubscribe from cart-recovery email (CASL/CAN-SPAM).
+ * The token is an HMAC of client + address, so links can't be forged or
+ * enumerated, and the page states plainly whether the opt-out took effect.
+ */
+app.get("/unsubscribe", async (req, res) => {
+  const { c: clientId, e: email, t: token } = req.query;
+  const page = (title, body) =>
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+     <title>${title}</title>
+     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:520px;margin:80px auto;padding:0 24px;color:#111827;line-height:1.6">
+       <h1 style="font-size:1.25rem">${title}</h1>${body}</div>`;
+
+  if (!clientId || !email || !token || token !== unsubscribeToken(String(clientId), String(email))) {
+    return res
+      .status(400)
+      .type("html")
+      .send(page("That unsubscribe link isn't valid", "<p>Please use the link from the most recent email, or reply to it and we'll remove you.</p>"));
+  }
+
+  try {
+    const rows = await unsubscribeEmail(String(clientId), String(email));
+    return res.type("html").send(
+      page(
+        "You're unsubscribed",
+        `<p>We've stopped cart reminder emails to <strong>${String(email).replace(/[<>&"]/g, "")}</strong>.</p>` +
+          `<p style="color:#6b7280;font-size:14px">${rows} reminder record(s) updated. No further cart emails will be sent to this address.</p>`
+      )
+    );
+  } catch (error) {
+    console.error("[unsubscribe] failed:", error.message);
+    return res
+      .status(500)
+      .type("html")
+      .send(page("Something went wrong", "<p>We couldn't process that just now. Please reply to the email and we'll remove you manually.</p>"));
+  }
+});
+
 // Malformed JSON bodies reach here as a SyntaxError from express.json().
 app.use((error, _req, res, next) => {
   if (error instanceof SyntaxError && "body" in error) {
@@ -199,6 +242,7 @@ export function start() {
       }
     }
     console.log(`Demo:  http://localhost:${config.port}/demo.html`);
+    startAbandonedCartPoller();
   });
 }
 

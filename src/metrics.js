@@ -144,7 +144,7 @@ export async function overviewMetrics({ clientId = null, days = 14 } = {}) {
 /** Every client row plus its own all-time conversation count. */
 export async function listClientsWithCounts() {
   const result = await getPool().query(
-    `select c.client_id, c.store_domain, c.mode, c.created_at,
+    `select c.client_id, c.store_domain, c.mode, c.tier, c.created_at,
             coalesce(e.n, 0)::int as conversations
      from clients c
      left join (

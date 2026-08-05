@@ -392,6 +392,80 @@ here, changing nothing), then sets the credentials, flips `mode` to `live`, and 
 during evaluation keeps working with zero changes on their end, and starts answering
 real order questions the moment the command completes.
 
+### Tiers and gated features
+
+Every client has a `tier` — `regular` (default) or `premium`. Tiers map to
+features in **[src/features.js](src/features.js)**, deliberately in code rather than
+the database so a rollout is a reviewable change with history:
+
+```js
+export const TIERS = {
+  regular: { abandonedCart: false },
+  premium: { abandonedCart: true },
+};
+```
+
+The per-request client lookup resolves this once and attaches it, so every gate is
+just `store.features.abandonedCart`. **Adding a future gated feature (say
+`addToCart`) means adding one key to each tier here — no new gating logic
+anywhere else.**
+
+Change a client's plan:
+
+```powershell
+npm run set-tier -- --client-id cl_xxx --tier premium
+```
+
+It validates the tier, prints the before/after tier and the resolved feature set,
+and takes effect on the next request and next poll — no restart or redeploy.
+
+> **Shopify scopes are separate from tiers.** `read_checkouts` (and Shopify's
+> protected customer data approval) is still a per-client setup step on the
+> Shopify side, whatever the tier. The tier gate controls whether this app *uses*
+> that access — a regular-tier client is never polled and never emailed even with
+> the scope granted.
+
+### Abandoned cart recovery (premium)
+
+Runs in-process every `ABANDONED_CART_POLL_MINUTES` (default 20). Each cycle, for
+**premium clients only**: fetches `abandonedCheckouts` from the Admin API, inserts
+new ones (skipping any with no email address, and any address that has
+unsubscribed), marks recovered carts, then sends whatever stage is due.
+
+| Stage | Timing after `detected_at` | Contents |
+| --- | --- | --- |
+| 1 | 1 hour | Cart contents + recovery link |
+| 2 | 24 hours | Reminder |
+| 3 | 72 hours | Adds `ABANDONED_CART_DISCOUNT_CODE` |
+
+Sending stops as soon as `recovered_at` is set, the customer unsubscribes, or three
+emails have gone out.
+
+**Email provider: Postmark.** Chosen over SendGrid because it separates traffic into
+explicit message streams — cart recovery is promotional, so it rides a *Broadcast*
+stream and cannot damage the reputation of transactional mail added later — and its
+send API is a single JSON POST, so no SDK dependency. Set `POSTMARK_SERVER_TOKEN`,
+`EMAIL_FROM`, and optionally `POSTMARK_MESSAGE_STREAM`. Without them, sends are
+skipped and logged rather than failing the poll.
+
+**CASL / CAN-SPAM.** Every email carries the client's store domain in the footer and
+a working one-click unsubscribe link, signed with an HMAC (`UNSUBSCRIBE_SECRET`) so
+links can't be forged or enumerated. `GET /unsubscribe` sets `unsubscribed = true`
+for every cart belonging to that address and confirms on-page how many records were
+updated; future carts from that address are skipped at ingest. Set `PUBLIC_BASE_URL`
+so the links point at the deployed host.
+
+> **Recovery detection deviates from the obvious design, by necessity.** Shopify's
+> `AbandonedCheckout` type exposes no cart token (verified against the 2026-07 API —
+> `cartToken` exists on `Order` but not on `AbandonedCheckout`), so a cart cannot be
+> joined to its order by token. Recovery is instead detected by an order from the
+> same email address placed after the cart was detected. That is slightly broader —
+> an unrelated second order by the same customer also counts as recovery — but it
+> errs toward *stopping* emails, which is the safe direction.
+
+Events `abandoned_checkout_detected` and `abandoned_cart_email_sent` (with
+`{stage: 1|2|3}`) are written to the same events table as everything else.
+
 ### Internal metrics
 
 Every request writes lightweight events to the `events` table (multi-tenant mode

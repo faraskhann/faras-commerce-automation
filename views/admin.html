@@ -66,6 +66,8 @@
   .badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
   .badge.live { background: #d1fae5; color: var(--ok); }
   .badge.demo { background: #fef3c7; color: var(--warn); }
+  .badge.premium { background: #ede9fe; color: #6d28d9; }
+  .badge.regular { background: #f1f5f9; color: var(--muted); }
   .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
   .right { text-align: right; }
   #detail { display: none; }
@@ -123,7 +125,7 @@
       <h2>Clients</h2>
       <div class="panel" style="padding:0">
         <table>
-          <thead><tr><th>Store</th><th>Mode</th><th>Client ID</th><th>Created</th><th class="right">Conversations</th></tr></thead>
+          <thead><tr><th>Store</th><th>Mode</th><th>Tier</th><th>Client ID</th><th>Created</th><th class="right">Conversations</th></tr></thead>
           <tbody id="client-rows"></tbody>
         </table>
       </div>
@@ -230,23 +232,26 @@
     var tbody = $("client-rows");
     tbody.innerHTML = "";
     if (!clients.length) {
-      tbody.innerHTML = '<tr><td colspan="5" class="empty">No clients registered.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No clients registered.</td></tr>';
       return;
     }
     clients.forEach(function (c) {
       var tr = document.createElement("tr");
-      var cells = [c.store_domain, null, c.client_id, String(c.created_at).slice(0, 10), c.conversations];
+      var tier = c.tier === "premium" ? "premium" : "regular";
+      // [store, mode badge, tier badge, id, created, conversations]
+      var cells = [c.store_domain, null, null, c.client_id, String(c.created_at).slice(0, 10), c.conversations];
       cells.forEach(function (val, i) {
         var td = document.createElement("td");
-        if (i === 1) {
+        if (i === 1 || i === 2) {
           var b = document.createElement("span");
-          b.className = "badge " + (c.mode === "live" ? "live" : "demo");
-          b.textContent = c.mode;
+          var isMode = i === 1;
+          b.className = "badge " + (isMode ? (c.mode === "live" ? "live" : "demo") : tier);
+          b.textContent = isMode ? c.mode : tier;
           td.appendChild(b);
         } else {
           td.textContent = val;
-          if (i === 2) td.className = "mono";
-          if (i === 4) td.className = "right";
+          if (i === 3) td.className = "mono";
+          if (i === 5) td.className = "right";
         }
         tr.appendChild(td);
       });
