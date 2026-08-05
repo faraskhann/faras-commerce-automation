@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { config } from "./config.js";
-import { getPool, listClientsWithFeature } from "./db.js";
+import { getPool, listClientsWithFeature, recordDiscountValidation } from "./db.js";
 import { shopifyGraphQL } from "./shopify.js";
 import { sendEmail, emailConfigured } from "./email.js";
 import { logEvent } from "./events.js";
@@ -67,6 +67,103 @@ const RECOVERY_ORDER_QUERY = /* GraphQL */ `
   }
 `;
 
+const DISCOUNT_CODE_QUERY = /* GraphQL */ `
+  query DiscountByCode($code: String!) {
+    codeDiscountNodeByCode(code: $code) {
+      id
+      codeDiscount {
+        __typename
+        ... on DiscountCodeBasic {
+          title
+          status
+          startsAt
+          endsAt
+          usageLimit
+          asyncUsageCount
+        }
+        ... on DiscountCodeBxgy {
+          title
+          status
+          startsAt
+          endsAt
+          usageLimit
+          asyncUsageCount
+        }
+        ... on DiscountCodeFreeShipping {
+          title
+          status
+          startsAt
+          endsAt
+          usageLimit
+          asyncUsageCount
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * Confirm a stored discount code is still real and usable in the client's own
+ * Shopify store. Returns a status string; only "valid" may be put in an email.
+ *
+ * Never throws: a lookup failure (missing read_discounts scope, network error)
+ * resolves to a non-valid status so the email still goes out, just without a
+ * code. Sending a code that doesn't work is worse than sending none.
+ */
+export async function validateDiscountCode(store, code) {
+  if (!code) return "not_set";
+
+  let data;
+  try {
+    data = await shopifyGraphQL(store, DISCOUNT_CODE_QUERY, { code });
+  } catch (error) {
+    const scopeIssue = /read_discounts/.test(error.message);
+    return scopeIssue ? "no_read_discounts_scope" : "lookup_failed";
+  }
+
+  const discount = data?.codeDiscountNodeByCode?.codeDiscount;
+  if (!discount) return "not_found";
+  if (discount.status && discount.status !== "ACTIVE") {
+    return `status_${String(discount.status).toLowerCase()}`;
+  }
+
+  const now = Date.now();
+  if (discount.startsAt && new Date(discount.startsAt).getTime() > now) return "not_started";
+  if (discount.endsAt && new Date(discount.endsAt).getTime() < now) return "expired";
+  if (
+    discount.usageLimit != null &&
+    discount.asyncUsageCount != null &&
+    discount.asyncUsageCount >= discount.usageLimit
+  ) {
+    return "exhausted";
+  }
+
+  return "valid";
+}
+
+/**
+ * The code to put in a stage-3 email, or null. Records every check so the
+ * dashboard can show whether a client's code last validated, and warns loudly
+ * when a configured code fails — otherwise emails go out discount-less forever
+ * and nobody notices.
+ */
+async function resolveDiscountCode(store) {
+  const code = store.discountCode;
+  const status = await validateDiscountCode(store, code);
+  await recordDiscountValidation(store.clientKey, status).catch(() => {});
+
+  if (status === "valid") return code;
+
+  if (code) {
+    console.warn(
+      `[abandoned-cart:${store.clientKey}] discount code "${code}" failed validation ` +
+        `(${status}) — stage-3 email will be sent WITHOUT a discount. Update it with ` +
+        `\`npm run set-discount-code -- --client-id ${store.clientKey} --code <code>\`.`
+    );
+  }
+  return null;
+}
+
 const STAGES = [
   { stage: 1, afterHours: 1, subject: (s) => `You left something behind at ${s}` },
   { stage: 2, afterHours: 24, subject: (s) => `Still thinking it over? Your ${s} cart is saved` },
@@ -112,13 +209,14 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function renderEmail({ store, row, stage }) {
+// `discount` is only ever a code that has just been validated against this
+// client's Shopify store; null means the email goes out without one.
+function renderEmail({ store, row, stage, discount = null }) {
   const snapshot = row.cart_snapshot ?? {};
   const items = snapshot.line_items ?? [];
   const firstName = snapshot.first_name;
   const greeting = firstName ? `Hi ${escapeHtml(firstName)},` : "Hi there,";
   const unsub = unsubscribeUrl(row.client_id, row.customer_email);
-  const discount = stage === 3 ? config.abandonedCart.discountCode : null;
 
   const itemLines = items
     .map((i) => `${i.quantity} × ${i.title}${i.variant ? ` (${i.variant})` : ""}`)
@@ -276,11 +374,26 @@ async function sendDueEmails(store) {
   );
 
   let sent = 0;
+  // Validate the client's code at most once per cycle, and only when a
+  // stage-3 email is actually due.
+  let discountResolved = false;
+  let discount = null;
+
   for (const row of due.rows) {
     const stageDef = STAGES[row.emails_sent];
     if (!stageDef) continue;
 
-    const { html, text } = renderEmail({ store, row, stage: stageDef.stage });
+    if (stageDef.stage === 3 && !discountResolved) {
+      discount = await resolveDiscountCode(store);
+      discountResolved = true;
+    }
+
+    const { html, text } = renderEmail({
+      store,
+      row,
+      stage: stageDef.stage,
+      discount: stageDef.stage === 3 ? discount : null,
+    });
     const result = await sendEmail({
       to: row.customer_email,
       subject: stageDef.subject(store.domain),

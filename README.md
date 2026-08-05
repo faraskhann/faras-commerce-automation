@@ -436,10 +436,40 @@ unsubscribed), marks recovered carts, then sends whatever stage is due.
 | --- | --- | --- |
 | 1 | 1 hour | Cart contents + recovery link |
 | 2 | 24 hours | Reminder |
-| 3 | 72 hours | Adds `ABANDONED_CART_DISCOUNT_CODE` |
+| 3 | 72 hours | Adds the client's discount code, if it validates (below) |
 
 Sending stops as soon as `recovered_at` is set, the customer unsubscribes, or three
 emails have gone out.
+
+**Discount codes are per client, in the database** (`clients.discount_code`), not a
+global env var — different clients run different promotions:
+
+```powershell
+npm run set-discount-code -- --client-id cl_xxx --code COMEBACK10
+npm run set-discount-code -- --client-id cl_xxx --clear
+```
+
+Setting a code validates it immediately against that client's own Shopify store and
+reports the result, so a typo surfaces at configuration time rather than in a
+customer's inbox.
+
+**Every stage-3 email re-validates the code before sending** via
+`codeDiscountNodeByCode`, checking that it exists, is `ACTIVE`, is inside its
+start/end window, and has not hit its usage limit. If any check fails — code
+missing, deleted, expired, exhausted, or the lookup itself fails — **the email is
+still sent, just without any discount mention.** Stage 3 is the last touchpoint in
+the sequence; dropping it entirely to avoid a broken code would forfeit the recovery
+attempt, whereas a plain reminder still converts. A code that doesn't work is never
+sent.
+
+Each failure logs a console warning naming the client, the code and the reason, so a
+stale code gets noticed instead of emails silently going out discount-less forever.
+The result of the last check is stored and shown in the admin client detail view
+(code, status badge, and when it was last checked).
+
+> `read_discounts` is an additional per-client Shopify scope, required for
+> validation. Without it, validation returns `no_read_discounts_scope`, no discount
+> is included, and the warning says exactly what to grant.
 
 **Email provider: Postmark.** Chosen over SendGrid because it separates traffic into
 explicit message streams — cart recovery is promotional, so it rides a *Broadcast*

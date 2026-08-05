@@ -100,7 +100,7 @@ export const config = {
     // Minutes between polls. Shopify marks a checkout abandoned well before
     // the first email goes out at 1h, so 20 minutes is ample.
     pollMinutes: Number(process.env.ABANDONED_CART_POLL_MINUTES) || 20,
-    discountCode: (process.env.ABANDONED_CART_DISCOUNT_CODE || "").trim() || null,
+    // Discount codes are per-client (clients.discount_code), not global.
     // Signs unsubscribe links so they can't be forged or enumerated.
     unsubscribeSecret: (process.env.UNSUBSCRIBE_SECRET || "").trim() || null,
   },

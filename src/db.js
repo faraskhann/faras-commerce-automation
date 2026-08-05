@@ -48,6 +48,7 @@ function toStore(row) {
     mode: row.mode === "demo" ? "demo" : "live",
     demoCatalog: row.demo_catalog ?? null,
     tier: row.tier ?? DEFAULT_TIER,
+    discountCode: row.discount_code ?? null,
     // Resolved once per request so downstream code checks
     // store.features.<name> instead of re-deriving from the tier.
     features: featuresForTier(row.tier ?? DEFAULT_TIER),
@@ -61,10 +62,27 @@ function toStore(row) {
 /** Resolve one client row into a store object, or null when unknown. */
 export async function getClientById(clientId) {
   const result = await getPool().query(
-    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog, tier from clients where client_id = $1",
+    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog, tier, discount_code from clients where client_id = $1",
     [clientId]
   );
   return result.rows[0] ? toStore(result.rows[0]) : null;
+}
+
+/** Discount-code configuration and last validation result, for the dashboard. */
+export async function getClientDiscountInfo(clientId) {
+  const result = await getPool().query(
+    "select discount_code, discount_code_status, discount_code_checked_at from clients where client_id = $1",
+    [clientId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/** Record the outcome of a discount-code validation against Shopify. */
+export async function recordDiscountValidation(clientId, status) {
+  await getPool().query(
+    "update clients set discount_code_status = $2, discount_code_checked_at = now() where client_id = $1",
+    [clientId, status]
+  );
 }
 
 /**
@@ -73,7 +91,7 @@ export async function getClientById(clientId) {
  */
 export async function listClientsWithFeature(featureName) {
   const result = await getPool().query(
-    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog, tier from clients"
+    "select client_id, store_domain, shopify_client_id, shopify_client_secret, allowed_origin, mode, demo_catalog, tier, discount_code from clients"
   );
   return result.rows.map(toStore).filter((store) => store.features[featureName] === true);
 }

@@ -68,6 +68,9 @@
   .badge.demo { background: #fef3c7; color: var(--warn); }
   .badge.premium { background: #ede9fe; color: #6d28d9; }
   .badge.regular { background: #f1f5f9; color: var(--muted); }
+  .badge.ok { background: #d1fae5; color: var(--ok); }
+  .badge.bad { background: #fee2e2; color: var(--bad); }
+  .badge.unknown { background: #f1f5f9; color: var(--muted); }
   .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: var(--muted); }
   .right { text-align: right; }
   #detail { display: none; }
@@ -146,6 +149,12 @@
             <div class="metric"><div class="label">get_order_status</div><div class="value" id="d-order">0</div></div>
             <div class="metric"><div class="label">Grounding retry rate</div><div class="value" id="d-retry">–</div></div>
             <div class="metric"><div class="label">Verification failures</div><div class="value" id="d-verify">0</div></div>
+          </div>
+          <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--line)">
+            <div class="label" style="font-size:13px;color:var(--muted)">Abandoned-cart discount code</div>
+            <div style="margin-top:4px"><span class="mono" id="d-discount" style="font-size:14px">–</span>
+              <span id="d-discount-status" style="margin-left:8px"></span></div>
+            <div class="sub2" id="d-discount-checked" style="color:var(--muted);font-size:12px;margin-top:3px"></div>
           </div>
         </div>
       </div>
@@ -276,6 +285,25 @@
       $("d-order").textContent = m.tools.get_order_status || 0;
       $("d-retry").textContent = pct(m.retryRatePct);
       $("d-verify").textContent = m.verificationFailed;
+
+      $("d-discount").textContent = m.discountCode || "none set";
+      var badge = $("d-discount-status");
+      badge.textContent = "";
+      badge.className = "";
+      if (m.discountCode) {
+        var okStatus = m.discountCodeStatus === "valid";
+        badge.className = "badge " + (okStatus ? "ok" : m.discountCodeStatus ? "bad" : "unknown");
+        badge.textContent = okStatus
+          ? "validated in Shopify"
+          : m.discountCodeStatus
+            ? m.discountCodeStatus.replace(/_/g, " ")
+            : "not yet checked";
+      }
+      $("d-discount-checked").textContent = m.discountCodeCheckedAt
+        ? "last checked " + String(m.discountCodeCheckedAt).slice(0, 19).replace("T", " ") + " UTC"
+        : m.discountCode
+          ? "never validated — will be checked when a stage-3 email is due"
+          : "";
       $("detail").style.display = "block";
       $("detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
     } catch (e) { handleFailure(e); }

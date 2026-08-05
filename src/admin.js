@@ -5,6 +5,7 @@ import express from "express";
 
 import { config } from "./config.js";
 import { overviewMetrics, listClientsWithCounts } from "./metrics.js";
+import { getClientDiscountInfo } from "./db.js";
 
 /**
  * Password-protected internal admin dashboard.
@@ -205,7 +206,16 @@ adminRouter.get("/admin/api/clients", async (_req, res) => {
 
 adminRouter.get("/admin/api/clients/:clientId", async (req, res) => {
   try {
-    res.json(await overviewMetrics({ clientId: req.params.clientId, days: 14 }));
+    const [metrics, discount] = await Promise.all([
+      overviewMetrics({ clientId: req.params.clientId, days: 14 }),
+      getClientDiscountInfo(req.params.clientId),
+    ]);
+    res.json({
+      ...metrics,
+      discountCode: discount?.discount_code ?? null,
+      discountCodeStatus: discount?.discount_code_status ?? null,
+      discountCodeCheckedAt: discount?.discount_code_checked_at ?? null,
+    });
   } catch (error) {
     console.error("[admin] client detail failed:", error.message);
     res.status(500).json({ error: "Failed to load client metrics." });
